@@ -30,30 +30,36 @@ void make_device_image(gsl::not_null<const real*> h_image,
                        cusp::array2d<real, cusp::device_memory>::view d_image)
 {
   const int npixels = d_image.num_cols;
-  auto d_image_r = d_image.values.begin().base().get() + npixels * 0;
-  auto d_image_g = d_image.values.begin().base().get() + npixels * 1;
-  auto d_image_b = d_image.values.begin().base().get() + npixels * 2;
-  const auto h_image_r = h_image.get() + 0;
-  const auto h_image_g = h_image.get() + 1;
-  const auto h_image_b = h_image.get() + 2;
-  strided_copy(h_image_r, d_image_r, 3, 1, npixels, cudaMemcpyHostToDevice);
-  strided_copy(h_image_g, d_image_g, 3, 1, npixels, cudaMemcpyHostToDevice);
-  strided_copy(h_image_b, d_image_b, 3, 1, npixels, cudaMemcpyHostToDevice);
+  const int nchannels = d_image.num_rows;
+  for (int c = 0; c < nchannels; ++c)
+  {
+    auto d_image_channel = d_image.values.begin().base().get() + npixels * c;
+    const auto h_image_channel = h_image.get() + c;
+    strided_copy(h_image_channel,
+                 d_image_channel,
+                 nchannels,
+                 1,
+                 npixels,
+                 cudaMemcpyHostToDevice);
+  }
 }
 
 void make_host_image(cusp::array2d<real, cusp::device_memory>::view d_image,
                      gsl::not_null<real*> h_image)
 {
   const int npixels = d_image.num_cols;
-  auto d_image_r = d_image.values.begin().base().get() + npixels * 0;
-  auto d_image_g = d_image.values.begin().base().get() + npixels * 1;
-  auto d_image_b = d_image.values.begin().base().get() + npixels * 2;
-  const auto h_image_r = h_image.get() + 0;
-  const auto h_image_g = h_image.get() + 1;
-  const auto h_image_b = h_image.get() + 2;
-  strided_copy(d_image_r, h_image_r, 1, 3, npixels, cudaMemcpyDeviceToHost);
-  strided_copy(d_image_g, h_image_g, 1, 3, npixels, cudaMemcpyDeviceToHost);
-  strided_copy(d_image_b, h_image_b, 1, 3, npixels, cudaMemcpyDeviceToHost);
+  const int nchannels = d_image.num_rows;
+  for (int c = 0; c < nchannels; ++c)
+  {
+    auto d_image_channel = d_image.values.begin().base().get() + npixels * c;
+    const auto h_image_channel = h_image.get() + c;
+    strided_copy(d_image_channel,
+                 h_image_channel,
+                 1,
+                 nchannels,
+                 npixels,
+                 cudaMemcpyDeviceToHost);
+  }
 }
 
 int main()

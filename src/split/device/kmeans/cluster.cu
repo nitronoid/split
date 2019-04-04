@@ -23,7 +23,7 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
     thrust::device_pointer_cast<int>(static_cast<int*>(do_temp.get()));
   // Create a view over the integer part
   auto d_itemp =
-    cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npoints * 2);
+    cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npoints * 2 + nclusters);
 
   // Offset the real part pointer by the size of the integer part
   auto d_rtemp_ptr =
