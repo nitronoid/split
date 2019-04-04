@@ -1,0 +1,5 @@
+build
+assets
+*.qmake*
+Makefile
+makefile
