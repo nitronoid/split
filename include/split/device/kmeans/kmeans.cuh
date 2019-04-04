@@ -5,7 +5,7 @@
 #include "split/device/kmeans/centroids.cuh"
 #include "split/device/kmeans/label.cuh"
 #include "split/device/kmeans/propagation.cuh"
+#include "split/device/kmeans/cluster.cuh"
 
 #endif  // SPLIT_DEVICE_INCLUDED_KMEANS
-
 

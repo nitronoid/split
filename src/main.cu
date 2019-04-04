@@ -78,24 +78,16 @@ int main()
   cusp::print(d_centroids);
   std::cout << "Done\n";
 
-  cusp::array1d<int, cusp::device_memory> d_cluster_labels(h_image.n_pixels(),
-                                                           -1);
-  cusp::array2d<real, cusp::device_memory, cusp::column_major> d_temp(
-    nclusters, h_image.n_pixels());
-  cusp::array1d<int, cusp::device_memory> d_itemp(h_image.n_pixels() * 2);
+  cusp::array1d<int, cusp::device_memory> d_cluster_labels(h_image.n_pixels());
 
-  const int max_iter = 10;
-  for (int iter = 0; iter < max_iter; ++iter)
-  {
-    std::cout << "Iter: " << (iter + 1) << '\n';
-    // Assign each pixel to it's nearest centroid
-    split::device::kmeans::label_points(
-      d_centroids, d_image, d_cluster_labels, d_temp);
+  // Allocate temporary memory
+  thrust::device_vector<uint8_t> d_temp(h_image.n_pixels() * nclusters *
+                                        sizeof(real));
 
-    // Calculate the new centroids by averaging all points in every centroid
-    split::device::kmeans::calculate_centroids(
-      d_cluster_labels, d_image, d_centroids, d_itemp);
-  }
+  thrust::device_ptr<void> d_temp_ptr{static_cast<void*>(d_temp.data().get())};
+
+  split::device::kmeans::cluster(
+    d_image, d_centroids, d_cluster_labels, d_temp_ptr, 100, 5e-1);
 
   std::cout << "Finalizing cluster colors\n";
   split::device::kmeans::propagate_centroids(
