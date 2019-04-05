@@ -11,7 +11,7 @@ namespace kmeans
 {
 /***
    @brief Calculates the centroids of each labeled cluster.
-   @param di_cluster_labels A dense array containing the labels for each point,
+   @param di_labels A dense array containing the labels for each point,
    indicating which cluster the point belongs to. This array is stored in device
    memory.
    @param di_points A 2D, dense, row major matrix containing the points to
@@ -25,7 +25,7 @@ namespace kmeans
    memory.
    ***/
 SPLIT_API void calculate_centroids(
-  cusp::array1d<int, cusp::device_memory>::const_view di_cluster_labels,
+  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
     do_centroids,
