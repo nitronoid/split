@@ -1,4 +1,5 @@
 #include "split/device/kmeans/centroids.cuh"
+#include "split/device/cuda_raii.cuh"
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
@@ -7,44 +8,6 @@
 #include <algorithm>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
-
-namespace
-{
-struct ScopedCuStream
-{
-  cudaStream_t handle;
-  cudaError_t status;
-
-  ScopedCuStream();
-
-  ~ScopedCuStream();
-
-  operator cudaStream_t() const noexcept;
-
-  void join() noexcept;
-};
-ScopedCuStream::ScopedCuStream()
-{
-  status = cudaStreamCreate(&handle);
-}
-
-ScopedCuStream::~ScopedCuStream()
-{
-  join();
-  status = cudaStreamDestroy(handle);
-}
-
-ScopedCuStream::operator cudaStream_t() const noexcept
-{
-  return handle;
-}
-
-void ScopedCuStream::join() noexcept
-{
-  status = cudaStreamSynchronize(handle);
-}
-
-}  // namespace
 
 namespace kmeans
 {
