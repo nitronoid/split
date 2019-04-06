@@ -1,4 +1,5 @@
 #include "split/device/kmeans/propagation.cuh"
+#include "split/device/cuda_raii.cuh"
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/gather.h>
 
@@ -12,18 +13,23 @@ SPLIT_API void propagate_centroids(
     di_centroids,
   cusp::array2d<real, cusp::device_memory>::view do_points)
 {
-  // Iterate over rgb channels at once
-  auto centroid_it = thrust::make_zip_iterator(
-    thrust::make_tuple(di_centroids.column(0).begin(),
-                       di_centroids.column(1).begin(),
-                       di_centroids.column(2).begin()));
-  auto pixel_it =
-    thrust::make_zip_iterator(thrust::make_tuple(do_points.row(0).begin(),
-                                                 do_points.row(1).begin(),
-                                                 do_points.row(2).begin()));
+  const int ndimensions = di_centroids.num_rows;
+  // FIXME: VLA's not allowed in C++
+  ScopedCuStream s[ndimensions];
+  using thrust::cuda::par;
 
-  thrust::gather(
-    di_cluster_labels.begin(), di_cluster_labels.end(), centroid_it, pixel_it);
+  for (int i = 0; i < ndimensions; ++i)
+  {
+    auto centroid_begin = di_centroids.column(i).begin();
+    auto point_begin = do_points.row(i).begin();
+    thrust::gather(par.on(s[i]),
+                   di_cluster_labels.begin(),
+                   di_cluster_labels.end(),
+                   centroid_begin,
+                   point_begin);
+  }
+  // Wait for all of our dimension tasks to complete
+  std::for_each(s, s + ndimensions, [](ScopedCuStream& s) { s.join(); });
 }
 
 }  // namespace kmeans

@@ -48,6 +48,9 @@ SPLIT_API void label_points(
   cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::view do_temp)
 {
+  const int npoints = di_points.num_cols;
+  const int ncentroids = di_centroids.num_rows;
+
   cusp::multiply(di_centroids,
                  di_points,
                  do_temp,
@@ -59,30 +62,29 @@ SPLIT_API void label_points(
                  },
                  thrust::plus<real>());
 
+  auto discard = thrust::make_discard_iterator();
+  auto count = thrust::make_counting_iterator(0);
   // Converts a 1D index into a row index
-  auto row_indices = thrust::make_transform_iterator(
-    thrust::counting_iterator<int>(0), unary_modulus<int>(do_temp.num_rows));
-
+  auto row_indices =
+    thrust::make_transform_iterator(count, unary_modulus<int>(ncentroids));
   // Converts a 1D index into a column index
-  auto col_indices = thrust::make_transform_iterator(
-    thrust::counting_iterator<int>(0), unary_divide<int>(do_temp.num_rows));
+  auto col_indices =
+    thrust::make_transform_iterator(count, unary_divide<int>(ncentroids));
 
   // Reduce each column, by finding the smallest distance contained, and writing
   // it's row index as the label
-  thrust::reduce_by_key(
-    col_indices,
-    col_indices + do_temp.num_entries,
-    thrust::make_zip_iterator(
-      thrust::make_tuple(do_temp.values.begin(), row_indices)),
-    thrust::make_discard_iterator(),
-    thrust::make_zip_iterator(thrust::make_tuple(
-      thrust::make_discard_iterator(), do_cluster_labels.begin())),
-    thrust::equal_to<int>(),
-    thrust::minimum<thrust::tuple<real, int>>());
+  thrust::reduce_by_key(col_indices,
+                        col_indices + ncentroids * npoints,
+                        thrust::make_zip_iterator(thrust::make_tuple(
+                          do_temp.values.begin(), row_indices)),
+                        discard,
+                        thrust::make_zip_iterator(thrust::make_tuple(
+                          discard, do_cluster_labels.begin())),
+                        thrust::equal_to<int>(),
+                        thrust::minimum<thrust::tuple<real, int>>());
 }
 
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END
-
 
