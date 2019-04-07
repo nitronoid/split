@@ -15,6 +15,9 @@ SPLIT_API void propagate_centroids(
   const int ndimensions = do_points.num_rows;
   cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions);
   propagate_centroids(streams, di_cluster_labels, di_centroids, do_points);
+  // Wait for all of our dimension tasks to complete
+  std::for_each(
+    streams.begin(), streams.end(), [](ScopedCuStream& s) { s.join(); });
 }
 
 SPLIT_API void propagate_centroids(
@@ -39,9 +42,6 @@ SPLIT_API void propagate_centroids(
                    centroid_begin,
                    point_begin);
   }
-  // Wait for all of our dimension tasks to complete
-  std::for_each(
-    io_streams.begin(), io_streams.end(), [](ScopedCuStream& s) { s.join(); });
 }
 
 }  // namespace kmeans

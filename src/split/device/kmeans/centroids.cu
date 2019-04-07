@@ -20,6 +20,9 @@ SPLIT_API void calculate_centroids(
   const int ndimensions = di_points.num_rows;
   cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions);
   calculate_centroids(streams, di_labels, di_points, do_centroids, do_temp);
+  // Wait for all of our dimension tasks to complete
+  std::for_each(
+    streams.begin(), streams.end(), [](ScopedCuStream& s) { s.join(); });
 }
 
 SPLIT_API void calculate_centroids(
@@ -101,9 +104,6 @@ SPLIT_API void calculate_centroids(
       centroid_begin,
       thrust::multiplies<real>());
   }
-  // Wait for all of our dimension tasks to complete
-  std::for_each(
-    io_streams.begin(), io_streams.end(), [](ScopedCuStream& s) { s.join(); });
 }
 }  // namespace kmeans
 

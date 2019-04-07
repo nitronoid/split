@@ -2,6 +2,7 @@
 #define SPLIT_DEVICE_INCLUDED_KMEANS_LABEL
 
 #include "split/detail/internal.h"
+#include "split/device/cuda_raii.cuh"
 #include <cusp/array1d.h>
 #include <cusp/array2d.h>
 
@@ -25,6 +26,17 @@ namespace kmeans
    centroid. This matrix is stored in device memory.
    ***/
 SPLIT_API void label_points(
+  cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
+    di_centroids,
+  cusp::array2d<real, cusp::device_memory>::const_view di_points,
+  cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
+  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view do_temp);
+
+/***
+  @brief Overload that allows a stream to be supplied directly.
+  ***/
+SPLIT_API void label_points(
+  ScopedCuStream& io_stream,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
     di_centroids,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,

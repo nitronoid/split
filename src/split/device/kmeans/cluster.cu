@@ -16,7 +16,7 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
         real i_threshold)
 {
   const int ndimensions = di_points.num_rows;
-  cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions);
+  cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions + 1);
   cluster(streams,
           di_points,
           dio_centroids,
@@ -39,7 +39,8 @@ cluster(cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
   const int npoints = di_points.num_cols;
   const int nclusters = dio_centroids.num_rows;
   const int ndimensions = di_points.num_rows;
-  assert(io_streams.size() >= ndimensions && "Insufficient number of streams");
+  assert(io_streams.size() >= (ndimensions + 1) &&
+         "Insufficient number of streams");
   using thrust::cuda::par;
 
   // Divide the supplied temporary memory into an integer part and a real part
@@ -88,17 +89,35 @@ cluster(cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
   do
   {
     ++iter;
-    // Assign each pixel to it's nearest centroid
-    split::device::kmeans::label_points(
-      d_const_centroids, di_points, do_cluster_labels, d_temp_mat);
     // Copy our centroids before calculating the new ones
-    cusp::blas::copy(d_old_centroids.values, dio_centroids.values);
-    // Calculate the new centroids by averaging all points in every centroid
+    thrust::copy(par.on(io_streams[0]),
+                 dio_centroids.values.begin(),
+                 dio_centroids.values.end(),
+                 d_old_centroids.values.begin());
+    // Assign each pixel to it's nearest centroid
+    split::device::kmeans::label_points(io_streams[1],
+                                        d_const_centroids,
+                                        di_points,
+                                        do_cluster_labels,
+                                        d_temp_mat);
+    // Wait for our labeling to complete
+    io_streams[1].join();
+    // Calculate the new centroids by averaging all points in every centroid,
+    // skip the first stream being used for the copy
     split::device::kmeans::calculate_centroids(
-      io_streams, do_cluster_labels, di_points, dio_centroids, d_itemp);
+      io_streams.subarray(1, ndimensions),
+      do_cluster_labels,
+      di_points,
+      dio_centroids,
+      d_itemp);
+    // Wait for the new centroids, and the old ones getting copied
+    std::for_each(io_streams.begin(), io_streams.end(), [](ScopedCuStream& s) {
+      s.join();
+    });
     // Calculate the total squared shift in centroids this iteration
     old_delta = delta;
     delta = thrust::inner_product(
+      par.on(io_streams[0]),
       centroid_it,
       centroid_it + nclusters,
       old_centroid_it,

@@ -77,6 +77,8 @@ int main()
 
   // Create initial means
   const int nclusters = 3;
+  cusp::array1d<split::device::ScopedCuStream, cusp::host_memory> streams(4);
+
   cusp::array2d<real, cusp::device_memory, cusp::column_major> d_centroids(
     nclusters, h_image.n_channels());
   std::cout << "Generating centroids\n";
@@ -93,11 +95,11 @@ int main()
   thrust::device_ptr<void> d_temp_ptr{static_cast<void*>(d_temp.data().get())};
 
   split::device::kmeans::cluster(
-    d_image, d_centroids, d_cluster_labels, d_temp_ptr, 100, 5e-1);
+    streams, d_image, d_centroids, d_cluster_labels, d_temp_ptr, 100, 5e-1);
 
   std::cout << "Finalizing cluster colors\n";
   split::device::kmeans::propagate_centroids(
-    d_cluster_labels, d_centroids, d_image);
+    streams, d_cluster_labels, d_centroids, d_image);
   std::cout << "Done\n";
 
   make_host_image(d_image, h_image.get());
