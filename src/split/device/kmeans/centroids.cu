@@ -1,5 +1,4 @@
 #include "split/device/kmeans/centroids.cuh"
-#include "split/device/cuda_raii.cuh"
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
@@ -18,37 +17,48 @@ SPLIT_API void calculate_centroids(
     do_centroids,
   cusp::array1d<int, cusp::device_memory>::view do_temp)
 {
+  const int ndimensions = di_points.num_rows;
+  cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions);
+  calculate_centroids(streams, di_labels, di_points, do_centroids, do_temp);
+}
+
+SPLIT_API void calculate_centroids(
+  cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
+  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
+  cusp::array2d<real, cusp::device_memory>::const_view di_points,
+  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
+    do_centroids,
+  cusp::array1d<int, cusp::device_memory>::view do_temp)
+{
   // Grab these sizes upfront with more readable names
   const int nlabels = di_labels.size();
   const int ndimensions = di_points.num_rows;
-
-  // FIXME: VLA's are not allowed in C++
-  ScopedCuStream s[std::max(2, ndimensions)];
+  assert(io_streams.size() >= ndimensions && "Insufficient number of streams");
   using thrust::cuda::par;
 
   // The first chunk of memory will be used to store labels
   auto labels = do_temp.subarray(0, nlabels);
   // Make a copy of the labels for sorting
   thrust::copy(
-    par.on(s[0]), di_labels.begin(), di_labels.end(), labels.begin());
+    par.on(io_streams[0]), di_labels.begin(), di_labels.end(), labels.begin());
 
   // The next chunk of temp storage will be used to store indices
   auto indices = do_temp.subarray(nlabels, nlabels);
   // Initialize the indices as a sequence
-  thrust::sequence(par.on(s[1]), indices.begin(), indices.end());
+  thrust::sequence(par.on(io_streams[1]), indices.begin(), indices.end());
 
   // We need to complete the copy and sequence before sorting
-  s[0].join();
-  s[1].join();
+  io_streams[0].join();
+  io_streams[1].join();
   // Sort the indices by label
   thrust::sort_by_key(
-    par.on(s[0]), labels.begin(), labels.end(), indices.begin());
+    par.on(io_streams[0]), labels.begin(), labels.end(), indices.begin());
 
   // Leave the valence uninitialized for now
   auto valence = do_temp.subarray(nlabels * 2, do_centroids.num_rows);
   // Calculate a dense histogram to find the cumulative valence
   // Find the indices where a segment boundary occurs
-  thrust::upper_bound(par.on(s[0]),
+  thrust::upper_bound(par.on(io_streams[0]),
                       labels.begin(),
                       labels.end(),
                       thrust::make_counting_iterator(0),
@@ -56,9 +66,9 @@ SPLIT_API void calculate_centroids(
                       valence.begin());
   // Calculate the non-cumulative valence by subtracting neighboring elements
   thrust::adjacent_difference(
-    par.on(s[0]), valence.begin(), valence.end(), valence.begin());
+    par.on(io_streams[0]), valence.begin(), valence.end(), valence.begin());
 
-  s[0].join();
+  io_streams[0].join();
   // Launch a reduction and a transform for each dimension of our data
   // asynchronously. This divides the workload and is flexible for N dimensions.
   for (int i = 0; i < ndimensions; ++i)
@@ -73,7 +83,7 @@ SPLIT_API void calculate_centroids(
     // Grab a handle to this dimensions task
     // Reduce by label to find the totals of all points for each cluster
     auto discard_it = thrust::make_discard_iterator();
-    thrust::reduce_by_key(par.on(s[i]),
+    thrust::reduce_by_key(par.on(io_streams[i]),
                           labels.begin(),
                           labels.end(),
                           point_it,
@@ -82,7 +92,7 @@ SPLIT_API void calculate_centroids(
     // Divide through by the number of contributions to each new centroid,
     // but actually multiply by the reciprocal through a transform iterator.
     thrust::transform(
-      par.on(s[i]),
+      par.on(io_streams[i]),
       centroid_begin,
       centroid_end,
       thrust::make_transform_iterator(
@@ -92,7 +102,8 @@ SPLIT_API void calculate_centroids(
       thrust::multiplies<real>());
   }
   // Wait for all of our dimension tasks to complete
-  std::for_each(s, s + ndimensions, [](ScopedCuStream& s) { s.join(); });
+  std::for_each(
+    io_streams.begin(), io_streams.end(), [](ScopedCuStream& s) { s.join(); });
 }
 }  // namespace kmeans
 

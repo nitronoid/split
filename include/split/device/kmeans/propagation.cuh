@@ -2,6 +2,7 @@
 #define SPLIT_DEVICE_INCLUDED_KMEANS_PROPAGATION
 
 #include "split/detail/internal.h"
+#include "split/device/cuda_raii.cuh"
 #include <cusp/array1d.h>
 #include <cusp/array2d.h>
 
@@ -21,6 +22,16 @@ namespace kmeans
    This matrix is stored in device memory.
    ***/
 SPLIT_API void propagate_centroids(
+  cusp::array1d<int, cusp::device_memory>::const_view di_cluster_labels,
+  cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
+    di_centroids,
+  cusp::array2d<real, cusp::device_memory>::view do_points);
+
+/***
+   @brief Overload that allows streams to be supplied directly.
+   ***/
+SPLIT_API void propagate_centroids(
+  cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
   cusp::array1d<int, cusp::device_memory>::const_view di_cluster_labels,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
     di_centroids,

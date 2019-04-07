@@ -15,8 +15,33 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
         int i_max_iter,
         real i_threshold)
 {
+  const int ndimensions = di_points.num_rows;
+  cusp::array1d<ScopedCuStream, cusp::host_memory> streams(ndimensions);
+  cluster(streams,
+          di_points,
+          dio_centroids,
+          do_cluster_labels,
+          do_temp,
+          i_max_iter,
+          i_threshold);
+}
+
+SPLIT_API void
+cluster(cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
+        cusp::array2d<real, cusp::device_memory>::const_view di_points,
+        cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
+          dio_centroids,
+        cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
+        thrust::device_ptr<void> do_temp,
+        int i_max_iter,
+        real i_threshold)
+{
   const int npoints = di_points.num_cols;
   const int nclusters = dio_centroids.num_rows;
+  const int ndimensions = di_points.num_rows;
+  assert(io_streams.size() >= ndimensions && "Insufficient number of streams");
+  using thrust::cuda::par;
+
   // Divide the supplied temporary memory into an integer part and a real part
   // The integer part is used for a radix sort by key
   auto d_itemp_ptr =
@@ -70,7 +95,7 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
     cusp::blas::copy(d_old_centroids.values, dio_centroids.values);
     // Calculate the new centroids by averaging all points in every centroid
     split::device::kmeans::calculate_centroids(
-      do_cluster_labels, di_points, dio_centroids, d_itemp);
+      io_streams, do_cluster_labels, di_points, dio_centroids, d_itemp);
     // Calculate the total squared shift in centroids this iteration
     old_delta = delta;
     delta = thrust::inner_product(
