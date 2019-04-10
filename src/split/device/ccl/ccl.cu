@@ -1,131 +1,178 @@
 #include "split/device/ccl/ccl.cuh"
+#include <cusp/graph/connected_components.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace ccl
 {
-
 namespace
 {
-__device__ __forceinline__ segvalue()
+// Read the 8-neighborhood into shared memory
+// FIXME: Clamp global reads so we don't go out of bounds, mostly done, need to
+// fix cases where the image doesn't align with block sizes
+__device__ void d_read_boundaries(const int* __restrict__ di_labels,
+                                  int* __restrict__ do_shared_memory,
+                                  const int i_mem_width,
+                                  const int i_global_width)
 {
+  // Global thread index
+  const int32_t tid = (threadIdx.x + threadIdx.y * blockDim.x) +
+                      (blockIdx.x + blockIdx.y * gridDim.x);
+  // Local thread index is offset by the 8-neighborhood
+  const int16_t mem_idx = (threadIdx.x + 1) + (threadIdx.y + 1) * i_mem_width;
+
+  // Conditionals
+  const int8_t is_top = threadIdx.y == 0;
+  const int8_t is_botm = threadIdx.y == blockDim.y - 1;
+  const int8_t is_left = threadIdx.x == 0;
+  const int8_t is_right = threadIdx.x == blockDim.x - 1;
+
+  // Check if we would be accessing out of bounds memory, store these as guards
+  const int8_t b_top = blockIdx.y != 0;
+  const int8_t b_botm = blockIdx.y != gridDim.y - 1;
+  const int8_t b_left = blockIdx.x != 0;
+  const int8_t b_right = blockIdx.x != gridDim.x - 1;
+
+  // Left = look behind by one
+  // Right = look ahead by one
+  // Up = look behind by width
+  // Down = look ahead by width
+
+  // Read upper neighbors
+  if (is_top)
+  {
+    do_shared_memory[mem_idx - i_mem_width] =
+      di_labels[tid - i_global_width * b_top];
+  }
+  // Read lower neighbors
+  if (is_botm)
+  {
+    do_shared_memory[mem_idx + i_mem_width] =
+      di_labels[tid + i_global_width * b_botm];
+  }
+  // Read left neighbors
+  if (is_left)
+  {
+    do_shared_memory[mem_idx - 1] = di_labels[tid - b_left];
+  }
+  // Read right neighbors
+  if (is_right)
+  {
+    do_shared_memory[mem_idx + 1] = di_labels[tid + b_right];
+  }
+  // Read corners
+  if (is_top && is_left)
+  {
+    do_shared_memory[mem_idx - i_mem_width - 1] =
+      di_labels[tid - i_global_width * b_top - b_left];
+  }
+  // Read corners
+  if (is_top && is_right)
+  {
+    do_shared_memory[mem_idx - i_mem_width + 1] =
+      di_labels[tid - i_global_width * b_top + b_left];
+  }
+  // Read corners
+  if (is_botm && is_left)
+  {
+    do_shared_memory[mem_idx - i_mem_width - 1] =
+      di_labels[tid + i_global_width * b_top - b_right];
+  }
+  // Read corners
+  if (is_botm && is_right)
+  {
+    do_shared_memory[mem_idx - i_mem_width + 1] =
+      di_labels[tid + i_global_width * b_top + b_right];
+  }
 }
 
-__global__ d_connected_components(const real* __restrict__ di_cluster_labels, int* __restrict__ do_segement_labels)
+__global__ void d_cluster_adjacency(const int* __restrict__ di_cluster_labels,
+                                    int8_t* __restrict__ do_connected,
+                                    const int i_width,
+                                    const int i_height)
 {
-  // The shared memory block
-  extern __shared__ uint8_t shared_memory[];
-  // One int for every thread in the block, plus the surrounding 8-neighbourhood,
-  // storing their original cluster labels
-  int* __restrict__ cluster_label = reinterpret_cast<int*>(shared_memory);
-  // One int for every thread in the block, representing it's new segment
-  //int* __restrict__ segment_label =
-  //  reinterpret_cast<int*>(cluster_label + (blockDim.x + 2) * (blockDim.y + 2));
-
   // Global thread index
-  const int tid = 
-    (threadIdx.x + threadIdx.y * blockDim.x) + (blockIdx.x + blockIdx.y * gridDim.x);
+  const int32_t tid = (threadIdx.x + threadIdx.y * blockDim.x) +
+                      (blockIdx.x + blockIdx.y * gridDim.x);
 
   // Guard against out of bounds memory reads
-  if (tid >= i_width * i_height) return;
+  if (tid >= i_width * i_height)
+    return;
 
   // Add padding to the block dimensions to get our shared memory dimensions
   const int16_t mem_width = blockDim.x + 2;
-  const int16_t mem_height = blockDim.y + 2;
-  // Local thread index is offset by the 8-neighbourhood
-  const int16_t mem_idx = (threadIdx.x + 1) + (threadIdx.y + 1) * mem_width;
 
+  // The shared memory block
+  extern __shared__ uint8_t shared_memory[];
+  // Two ints for every thread in the block, plus the surrounding
+  // 8-neighborhood, storing their original cluster labels
+  int* __restrict__ cluster_label = reinterpret_cast<int*>(shared_memory);
+
+  // Local thread index is offset by the 8-neighborhood
+  const int16_t mem_idx = (threadIdx.x + 1) + (threadIdx.y + 1) * mem_width;
   // Read the cluster labels into shared memory
   cluster_label[mem_idx] = di_cluster_labels[tid];
-  // Initial values for the segment labels, are just indices
-  segement_label[mem_idx] = di_cluster_labels[tid] + 1;
+  // Read the boundary data, to access to the 8-neighborhood from this block
+  d_read_boundaries(di_cluster_labels, cluster_label, mem_width, i_width);
+  // Ensure all shared memory writes have been completed
+  __syncthreads();
 
-  const auto read_boundaries = [=]{
-  // Read the 8-neighbourhood into shared memory
-  if (threadIdx.y <= 1)
-  {
-    const int16_t local_tid = threadIdx.x + threadIdx.y * blockDim.x;
-    // If we're in the second row of threads,
-    // we need to read from the opposite side of the block
-    const int8_t is_second = threadIdx.y;
-
-    // First we read the top and bottom rows
-    // If we're in the first row, we need to subtract the width of the 
-    // block from our index. If we're in the second, we'll 
-    // add the width times the height of our block, minus one row.
-    const int16_t mem_row_idx =
-      mem_idx + mem_width * (-1 + blockDim.y * is_second);
-    const int32_t global_row_idx = 
-      tid + i_width * (-1 + blockDim.y * is_second);
-
-    // Copy across
-    cluster_label[mem_row_idx] = di_cluster_labels[global_row_idx];
-
-    // Next we read the left and right columns
-    // We take the current thread index and add the width of the block times
-    // our local thread index. We subtract our memory x coordinate from that.
-    // Then if we're in the second row, we need to offset by the width of the 
-    // thread block.
-    const int16_t mem_col_idx =
-      mem_idx + threadIdx.x * mem_width - mem_x + is_second * (mem_width - 1);
-    const int32_t global_col_idx = 
-      tid + threadIdx.x * i_width - mem_x + is_second * (mem_width - 1);
-
-    // Copy across
-    cluster_label[mem_col_idx] = di_cluster_labels[global_col_idx];
-
-    // Copy the corners across
-    if (threadIdx.x <= 1)
-    {
-      const int16_t mem_corner_idx = 
-        (mem_width - 1) * threadIdx.x + (mem_height - 1) * is_second * i_width;
-      const int32_t global_corner_idx = 
-        tid + i_width * (-1 + blockDim.y * is_second) + (-1 + blockDim.x * threadIdx.x);
-
-      cluster_label[mem_corner_idx] = di_cluster_labels[global_corner_idx];
-    }
-  }};
-
-  const auto write_boundaries = [=]{
-  };
-
-  read_boundaries();
-
-  // each thread can access it's 8 neighbourhood in shared memory 
-  const auto segmax = [a] (int16_t a, int16_t b)
-  {
-    return max(segment_label[a], segment_label[b] * (cluster_label[a] == cluster_label[b]));
-  };
-
-  const int16_t up = (threadIdx.x + 1) + threadIdx.y * blockDim.x;
-  const int16_t down = (threadIdx.x + 1) + (threadIdx.y + 2) * blockDim.x;
-  while (!converged)
-  {
-    // Check row neighbours
-    segment_label[mem_idx] = segmax(segmax(mem_idx, mem_idx - 1), mem_idx + 1);
-    // Check col neighbours, no need to check diags, as the two passes cover it
-    segment_label[mem_idx] = segmax(segmax(mem_idx, up), down);
-
-    // At the end of each iter, we must update the boundaries, so that we can
-    // propagate our results across blocks
-    write_boundaries();
-    read_boundaries();
-  }
-  
-  
-
-
+  /***
+    Stored in order NW,N,NE,W,E,SW,S,SE
+    NW - N - NE
+    |    |    |
+    W  - O -  E
+    |    |    |
+    SW - S - SE
+    ***/
+  // Output the results using two vectorized writes
+  *reinterpret_cast<char4*>(do_connected + tid * 8 + 0) = make_char4(
+    /*NW*/ (cluster_label[mem_idx] == cluster_label[mem_idx - mem_width - 1]),
+    /*N */ (cluster_label[mem_idx] == cluster_label[mem_idx - mem_width]),
+    /*NE*/ (cluster_label[mem_idx] == cluster_label[mem_idx - mem_width + 1]),
+    /*W */ (cluster_label[mem_idx] == cluster_label[mem_idx - 1]));
+  *reinterpret_cast<char4*>(do_connected + tid * 8 + 4) = make_char4(
+    /*E */ (cluster_label[mem_idx] == cluster_label[mem_idx + 1]),
+    /*SW*/ (cluster_label[mem_idx] == cluster_label[mem_idx + mem_width - 1]),
+    /*S */ (cluster_label[mem_idx] == cluster_label[mem_idx + mem_width]),
+    /*SE*/ (cluster_label[mem_idx] == cluster_label[mem_idx + mem_width + 1]));
 }
-}
+}  // namespace
 
-SPLIT_API void
-connected_components(cusp::array2d<real, cusp::device_memory>::const_view di_points,
-                     cusp::array1d<real, cusp::device_memory>::view do_labels)
+SPLIT_API void connected_components(
+  cusp::array2d<int, cusp::device_memory>::const_view di_cluster_labels,
+  cusp::array1d<int, cusp::device_memory>::view do_labels)
 {
+  const int width = di_cluster_labels.num_cols;
+  const int height = di_cluster_labels.num_rows;
+  // Number of labels
+  const int nlabels = width * height;
 
+  // Matrix has max of 8 entries per label
+  cusp::csr_matrix<int, int8_t, cusp::device_memory> d_adjacency(
+    nlabels, nlabels, di_cluster_labels.num_entries * 8);
+
+  dim3 grid_dim, block_dim;
+  block_dim.x = 32;
+  block_dim.y = 32;
+  grid_dim.x = width / block_dim.x + 1;
+  grid_dim.y = height / block_dim.y + 1;
+
+  const int shared_memory_size =
+    (block_dim.x + 2) * (block_dim.y + 2) * sizeof(int32_t);
+
+  // Get adjacency information, 8-neighborhood minus non equal cluster labels
+  d_cluster_adjacency<<<grid_dim, block_dim, shared_memory_size>>>(
+    di_cluster_labels.values.begin().base().get(),
+    d_adjacency.values.begin().base().get(),
+    width,
+    height);
+
+  // Get our components
+  cusp::graph::connected_components(d_adjacency, do_labels);
 }
 
-}
+}  // namespace ccl
 
 SPLIT_DEVICE_NAMESPACE_END
 

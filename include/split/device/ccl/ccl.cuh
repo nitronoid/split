@@ -31,14 +31,13 @@ namespace ccl
    isn't found.
    @param i_threshold The threshold for error when checking for convergence.
    ***/
-SPLIT_API void
-connected_components(cusp::array2d<real, cusp::device_memory>::const_view di_points,
-                     cusp::array1d<real, cusp::device_memory>::view do_labels);
+SPLIT_API void connected_components(
+  cusp::array2d<int, cusp::device_memory>::const_view di_cluster_labels,
+  cusp::array1d<int, cusp::device_memory>::view do_labels);
 
-}  // namespace kmeans
+}  // namespace ccl
 
 SPLIT_DEVICE_NAMESPACE_END
 
 #endif  // SPLIT_DEVICE_INCLUDED_CCL_CCL
-
 
