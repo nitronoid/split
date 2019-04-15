@@ -27,7 +27,7 @@ SPLIT_API void propagate_centroids(
     di_centroids,
   cusp::array2d<real, cusp::device_memory>::view do_points)
 {
-  const int ndimensions = di_centroids.num_rows;
+  const int ndimensions = di_centroids.num_cols;
   assert(io_streams.size() >= ndimensions && "Insufficient number of streams");
   using thrust::cuda::par;
 
