@@ -1,4 +1,7 @@
 #include "split/device/kmeans/kmeans.cuh"
+#include "split/device/ccl/point_point_adjacency.cuh"
+#include "split/device/ccl/connected_components.cuh"
+#include "split/device/ccl/compress_labels.cuh"
 #include "split/host/stbi/stbi_raii.hpp"
 
 #include <cusp/print.h>
@@ -76,7 +79,8 @@ int main()
   std::fill_n(h_image.get(), h_image.n_pixel_data(), 0.5f);
 
   // Create initial means
-  const int nclusters = 3;
+  const int nclusters = 10;
+  const int npixels = h_image.n_pixels();
   cusp::array1d<split::device::ScopedCuStream, cusp::host_memory> streams(4);
 
   cusp::array2d<real, cusp::device_memory, cusp::column_major> d_centroids(
@@ -86,23 +90,52 @@ int main()
   cusp::print(d_centroids);
   std::cout << "Done\n";
 
-  cusp::array1d<int, cusp::device_memory> d_cluster_labels(h_image.n_pixels());
-
+  cusp::array2d<int, cusp::device_memory> d_cluster_labels(h_image.height(),
+                                                           h_image.width());
+  cusp::array2d<int, cusp::device_memory> d_segment_labels(h_image.height(),
+                                                           h_image.width());
   // Allocate temporary memory
   thrust::device_vector<uint8_t> d_temp(h_image.n_pixels() * nclusters *
                                         sizeof(real));
-
   thrust::device_ptr<void> d_temp_ptr{static_cast<void*>(d_temp.data().get())};
 
-  split::device::kmeans::cluster(
-    streams, d_image, d_centroids, d_cluster_labels, d_temp_ptr, 100, 5e-1);
+  auto d_itemp_ptr =
+    thrust::device_pointer_cast<int>(static_cast<int*>(d_temp_ptr.get()));
+  // Create a view over the integer part
+  auto d_itemp =
+    cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npixels * 2 + nclusters);
+
+  // K-means cluster the image
+  split::device::kmeans::cluster(streams,
+                                 d_image,
+                                 d_centroids,
+                                 d_cluster_labels.values,
+                                 d_temp_ptr,
+                                 100,
+                                 5e-1);
+
+  // Obtain isolated segments from our initial clustering
 
   std::cout << "Finalizing cluster colors\n";
   split::device::kmeans::propagate_centroids(
-    streams, d_cluster_labels, d_centroids, d_image);
+    streams, d_cluster_labels.values, d_centroids, d_image);
   std::cout << "Done\n";
 
   make_host_image(d_image, h_image.get());
+
+  split::device::ccl::connected_components(
+    d_cluster_labels, d_temp_ptr, d_segment_labels.values, 100);
+  split::device::ccl::compress_labels(d_segment_labels.values, d_temp_ptr);
+  const int nsegments = (*thrust::max_element(d_segment_labels.values.begin(),
+                                              d_segment_labels.values.end())) +
+                        1;
+  std::cout << nsegments << '\n';
+
+  // Re-calculate the centroids using the segment labels
+  cusp::array2d<real, cusp::device_memory, cusp::column_major> d_seg_centroids(
+    nsegments, h_image.n_channels());
+  split::device::kmeans::calculate_centroids(
+    d_segment_labels.values, d_image, d_seg_centroids, d_itemp);
 
   split::host::stbi::writef("assets/images/out.png", h_image);
 
