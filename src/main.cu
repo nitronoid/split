@@ -97,10 +97,10 @@ int main()
   // Allocate temporary memory
   thrust::device_vector<uint8_t> d_temp(h_image.n_pixels() * nclusters *
                                         sizeof(real));
-  thrust::device_ptr<void> d_temp_ptr{static_cast<void*>(d_temp.data().get())};
-
+  auto d_temp_ptr =
+    thrust::device_pointer_cast(static_cast<void*>(d_temp.data().get()));
   auto d_itemp_ptr =
-    thrust::device_pointer_cast<int>(static_cast<int*>(d_temp_ptr.get()));
+    thrust::device_pointer_cast(static_cast<int*>(d_temp_ptr.get()));
   // Create a view over the integer part
   auto d_itemp =
     cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npixels * 2 + nclusters);
@@ -120,24 +120,60 @@ int main()
   split::device::kmeans::propagate_centroids(
     streams, d_cluster_labels.values, d_centroids, d_image);
   std::cout << "Done\n";
-
   make_host_image(d_image, h_image.get());
+  split::host::stbi::writef("assets/images/clusters.png", h_image);
 
+#if 0
+  std::vector<int> l = {
+    3, 7, 7, 7, 7, 7, 7, 0, 6, 6, 2, 2, 2, 2, 7, 7, 
+    2, 3, 7, 7, 7, 7, 7, 7, 7, 7, 0, 2, 8, 2, 0, 7, 
+    2, 3, 7, 7, 7, 7, 7, 7, 7, 7, 0, 2, 8, 8, 2, 0, 
+    2, 2, 3, 0, 7, 7, 7, 7, 7, 7, 0, 0, 8, 8, 2, 3, 
+    2, 2, 2, 2, 2, 0, 7, 7, 7, 7, 7, 0, 2, 2, 2, 2, 
+    8, 2, 2, 2, 2, 3, 7, 7, 7, 7, 7, 7, 2, 2, 2, 2, 
+    8, 8, 2, 2, 2, 2, 0, 4, 7, 7, 7, 3, 2, 7, 7, 2, 
+    8, 8, 2, 2, 2, 2, 3, 7, 7, 7, 7, 2, 2, 0, 7, 7, 
+    8, 8, 8, 2, 2, 2, 4, 4, 7, 7, 7, 8, 2, 2, 4, 7, 
+    8, 8, 8, 2, 2, 2, 2, 2, 7, 7, 7, 8, 8, 2, 3, 3, 
+    8, 8, 8, 2, 2, 2, 2, 2, 7, 7, 2, 8, 8, 2, 2, 3, 
+    8, 2, 2, 2, 2, 2, 2, 2, 7, 7, 2, 8, 8, 2, 2, 2, 
+    8, 2, 4, 3, 2, 2, 2, 2, 7, 7, 2, 8, 8, 2, 2, 2, 
+    8, 8, 2, 2, 8, 2, 2, 3, 7, 7, 8, 8, 8, 2, 2, 2, 
+    8, 2, 8, 2, 2, 2, 2, 3, 7, 7, 8, 8, 8, 2, 2, 2, 
+    8, 2, 8, 2, 7, 4, 2, 7, 7, 7, 8, 8, 8, 8, 2, 8};
+
+  cusp::array2d<int, cusp::device_memory> d_cl(16,16);
+  thrust::copy(l.begin(), l.end(), d_cl.values.begin());
+  cusp::array2d<int, cusp::device_memory> d_sl(16,16);
+
+  split::device::ccl::connected_components(d_cl, d_temp_ptr, d_sl.values, 1);
+  split::device::ccl::compress_labels(d_sl.values, d_temp_ptr);
+  //cusp::print(d_sl);
+
+  const int nsegments = (*thrust::max_element(d_sl.values.begin(),
+                                              d_sl.values.end())) +
+                        1;
+  std::cout << nsegments << '\n';
+#else
   split::device::ccl::connected_components(
-    d_cluster_labels, d_temp_ptr, d_segment_labels.values, 100);
+      d_cluster_labels, d_temp_ptr, d_segment_labels.values, 10);
+
   split::device::ccl::compress_labels(d_segment_labels.values, d_temp_ptr);
   const int nsegments = (*thrust::max_element(d_segment_labels.values.begin(),
                                               d_segment_labels.values.end())) +
                         1;
   std::cout << nsegments << '\n';
-
   // Re-calculate the centroids using the segment labels
   cusp::array2d<real, cusp::device_memory, cusp::column_major> d_seg_centroids(
     nsegments, h_image.n_channels());
   split::device::kmeans::calculate_centroids(
     d_segment_labels.values, d_image, d_seg_centroids, d_itemp);
+  split::device::kmeans::propagate_centroids(
+    streams, d_segment_labels.values, d_seg_centroids, d_image);
 
-  split::host::stbi::writef("assets/images/out.png", h_image);
+  make_host_image(d_image, h_image.get());
+  split::host::stbi::writef("assets/images/segments.png", h_image);
+#endif
 
   return 0;
 }
