@@ -7,7 +7,6 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 namespace kmeans
 {
 SPLIT_API void propagate_centroids(
-  cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
   cusp::array1d<int, cusp::device_memory>::const_view di_cluster_labels,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
     di_centroids,

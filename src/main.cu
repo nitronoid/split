@@ -119,7 +119,7 @@ int main()
     d_segment_labels.values, d_image, d_seg_centroids, d_itemp);
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
-    streams, d_segment_labels.values, d_seg_centroids, d_image);
+    d_segment_labels.values, d_seg_centroids, d_image);
 
   make_host_image(d_image, h_image.get());
   split::host::stbi::writef("assets/images/segments.png", h_image);
