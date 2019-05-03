@@ -21,16 +21,15 @@ namespace kmeans
    @param do_centroids A 2D, dense, column major matrix containing the centroids
    calculated using the labeled clusters. This matrix is stored in device
    memory.
-   @param do_temp A dense array used for temporary storage, so that we can
-   perform a radix sort without allocation. This matrix is stored in device
-   memory.
+   @param do_temp A pointer to temporary storage, so that we can perform a radix
+   sort without allocation. This memory is stored on the device.
    ***/
 SPLIT_API void calculate_centroids(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
     do_centroids,
-  cusp::array1d<int, cusp::device_memory>::view do_temp);
+  thrust::device_ptr<void> do_temp);
 
 }  // namespace kmeans
 

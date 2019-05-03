@@ -18,31 +18,25 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
 {
   const int npoints = di_points.num_cols;
   const int nclusters = dio_centroids.num_rows;
-  // Divide the supplied temporary memory into an integer part and a real part
-  // The integer part is used for a radix sort by key
-  auto d_itemp_ptr =
-    thrust::device_pointer_cast(static_cast<int*>(do_temp.get()));
-  // Create a view over the integer part
-  auto d_itemp =
-    cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npoints * 2);
 
   // Offset the real part pointer by the size of the integer part
   auto d_rtemp_ptr =
-    thrust::device_pointer_cast<real>(static_cast<real*>(do_temp.get()));
+    thrust::device_pointer_cast(static_cast<real*>(do_temp.get()));
   // Create a view over the real part
   cusp::array1d<real, cusp::device_memory>::view d_rtemp(
     d_rtemp_ptr, d_rtemp_ptr + npoints * nclusters);
-
   // Create a dense, 2D, column major matrix view over the temp storage
   auto d_temp_mat = cusp::make_array2d_view(
     npoints, nclusters, 1, d_rtemp, cusp::column_major{});
 
   // Reuse the temporary storage again here to store our old centroids
+  // NOTE: we offset the beginning of the sub-array as the start of our temp
+  // memory is used for a radix sort every iteration.
   auto d_old_centroids = cusp::make_array2d_view(
     dio_centroids.num_rows,
     dio_centroids.num_cols,
     1,
-    d_rtemp.subarray(d_itemp.size(), nclusters * dio_centroids.num_cols),
+    d_rtemp.subarray(npoints * 2, nclusters * dio_centroids.num_cols),
     cusp::column_major{});
 
   // Need to explicitly create an immutable view over the centroids
@@ -66,10 +60,12 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
     split::device::kmeans::label_points(
       d_const_centroids, di_points, do_cluster_labels, d_temp_mat);
     // Copy our centroids before calculating the new ones
-    cusp::blas::copy(d_old_centroids.values, dio_centroids.values);
+    thrust::copy(dio_centroids.values.begin(),
+                 dio_centroids.values.end(),
+                 d_old_centroids.values.begin());
     // Calculate the new centroids by averaging all points in every centroid
     split::device::kmeans::calculate_centroids(
-      do_cluster_labels, di_points, dio_centroids, d_itemp);
+      do_cluster_labels, di_points, dio_centroids, do_temp);
     // Calculate the total squared shift in centroids this iteration
     old_delta = delta;
     delta = thrust::inner_product(

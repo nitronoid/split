@@ -16,24 +16,31 @@ SPLIT_API void calculate_centroids(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
     do_centroids,
-  cusp::array1d<int, cusp::device_memory>::view do_temp)
+  thrust::device_ptr<void> do_temp)
 {
   // Store the number of points
   const int npoints = di_points.num_cols;
+  // Store the number of centroids
+  const int ncentroids = di_points.num_cols;
+
+  // Cast our temp memory to integer storage
+  auto itemp = thrust::device_pointer_cast(static_cast<int*>(do_temp.get()));
+  auto itemp_array =
+    cusp::make_array1d_view(itemp, itemp + npoints * 2 + ncentroids);
 
   // Make a copy of our input labels, storing it in the temp memory provided
-  auto labels_copy = do_temp.subarray(0, npoints);
+  auto labels_copy = itemp_array.subarray(0, npoints);
   thrust::copy(di_labels.begin(), di_labels.end(), labels_copy.begin());
 
   // Initialize the point indices to a standard sequence, for sorting later
-  auto indices = do_temp.subarray(npoints, npoints);
+  auto indices = itemp_array.subarray(npoints, npoints);
   thrust::sequence(indices.begin(), indices.end());
 
   // Sort by label, we use the copy here to avoid modifying the input labels
   thrust::sort_by_key(labels_copy.begin(), labels_copy.end(), indices.begin());
 
   // Create a new sub view into our temp memory for storing cluster valence
-  auto valence = do_temp.subarray(npoints * 2, labels_copy.back() + 1);
+  auto valence = itemp_array.subarray(npoints * 2, ncentroids);
   // Create a counting iter to output the index values from the upper_bound
   auto search_begin = thrust::make_counting_iterator(0);
   // Calculate a dense histogram to find the cumulative valence

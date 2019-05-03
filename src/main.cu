@@ -90,33 +90,44 @@ int main()
                                                            h_image.width());
   cusp::array2d<int, cusp::device_memory> d_segment_labels(h_image.height(),
                                                            h_image.width());
+
   // Allocate temporary memory
-  thrust::device_vector<uint8_t> d_temp(h_image.n_pixels() * nclusters *
-                                        sizeof(real));
-  auto d_temp_ptr =
-    thrust::device_pointer_cast(static_cast<void*>(d_temp.data().get()));
-  auto d_itemp_ptr =
-    thrust::device_pointer_cast(static_cast<int*>(d_temp_ptr.get()));
-  // Create a view over the integer part
-  auto d_itemp =
-    cusp::make_array1d_view(d_itemp_ptr, d_itemp_ptr + npixels * 2 + nclusters);
+  struct TempMemory
+  {
+    TempMemory(std::size_t N) : m_ptr(thrust::device_malloc(N))
+    {
+    }
+
+    ~TempMemory()
+    {
+      thrust::device_free(m_ptr);
+    }
+
+    thrust::device_ptr<void> get() const
+    {
+      return m_ptr;
+    }
+
+  private:
+    thrust::device_ptr<void> m_ptr;
+  } d_temp(h_image.n_pixels() * nclusters * sizeof(real));
 
   // K-means cluster the image
   split::device::kmeans::cluster(
-    d_image, d_centroids, d_cluster_labels.values, d_temp_ptr, 100, 5e-1);
+    d_image, d_centroids, d_cluster_labels.values, d_temp.get(), 100, 5e-1);
 
   // Obtain isolated segments from our initial clustering
   split::device::ccl::connected_components(
-    d_cluster_labels, d_temp_ptr, d_segment_labels.values, 100);
+    d_cluster_labels, d_temp.get(), d_segment_labels.values, 100);
   // Compress the segment labels to produce a contiguous sequence
   const int nsegments =
-    split::device::ccl::compress_labels(d_segment_labels.values, d_temp_ptr);
+    split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
   // Re-calculate the centroids using the segment labels
   cusp::array2d<real, cusp::device_memory, cusp::column_major> d_seg_centroids(
     nsegments, h_image.n_channels());
   // Re-calculate the centroids using the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
-    d_segment_labels.values, d_image, d_seg_centroids, d_itemp);
+    d_segment_labels.values, d_image, d_seg_centroids, d_temp.get());
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
     d_segment_labels.values, d_seg_centroids, d_image);
