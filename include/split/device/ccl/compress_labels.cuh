@@ -17,8 +17,9 @@ namespace ccl
    @param dio_labels A dense array containing the cluster labels for each point.
    This list will be compressed in place. This array is stored in device memory.
    @param dio_temp A pointer to a memory block for use in this function.
+   @return The number of unique labels after compression.
    ***/
-SPLIT_API void compress_labels(
+SPLIT_API int compress_labels(
   cusp::array1d<int, cusp::device_memory>::view dio_labels,
   thrust::device_ptr<void> dio_temp);
 
