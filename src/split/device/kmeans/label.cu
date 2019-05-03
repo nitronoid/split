@@ -1,6 +1,7 @@
 #include "split/device/kmeans/label.cuh"
 #include "split/device/detail/matrix_functional.cuh"
 #include "split/device/detail/unary_functional.cuh"
+#include "split/device/detail/zip_it.cuh"
 #include <cusp/functional.h>
 #include <cusp/multiply.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -39,11 +40,9 @@ SPLIT_API void label_points(
   thrust::reduce_by_key(
     row_indices,
     row_indices + do_temp.num_entries,
-    thrust::make_zip_iterator(
-      thrust::make_tuple(do_temp.values.begin(), col_indices)),
+    detail::zip_it(do_temp.values.begin(), col_indices),
     thrust::make_discard_iterator(),
-    thrust::make_zip_iterator(thrust::make_tuple(
-      thrust::make_discard_iterator(), do_cluster_labels.begin())),
+    detail::zip_it(thrust::make_discard_iterator(), do_cluster_labels.begin()),
     thrust::equal_to<int>(),
     thrust::minimum<thrust::tuple<real, int>>());
 }
