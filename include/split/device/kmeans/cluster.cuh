@@ -40,18 +40,6 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
         int i_max_iter,
         real i_threshold = 1.f);
 
-/***
-   @brief Overload that allows streams to be supplied directly.
-   ***/
-SPLIT_API void
-cluster(cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
-        cusp::array2d<real, cusp::device_memory>::const_view di_points,
-        cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-          dio_centroids,
-        cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
-        thrust::device_ptr<void> do_temp,
-        int i_max_iter,
-        real i_threshold = 1.f);
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END

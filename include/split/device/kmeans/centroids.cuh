@@ -32,16 +32,6 @@ SPLIT_API void calculate_centroids(
     do_centroids,
   cusp::array1d<int, cusp::device_memory>::view do_temp);
 
-/***
-   @brief Overload that allows streams to be supplied directly.
-   ***/
-SPLIT_API void calculate_centroids(
-  cusp::array1d<ScopedCuStream, cusp::host_memory>::view io_streams,
-  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-    do_centroids,
-  cusp::array1d<int, cusp::device_memory>::view do_temp);
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END

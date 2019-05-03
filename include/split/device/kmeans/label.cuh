@@ -31,17 +31,6 @@ SPLIT_API void label_points(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
   cusp::array2d<real, cusp::device_memory, cusp::column_major>::view do_temp);
-
-/***
-  @brief Overload that allows a stream to be supplied directly.
-  ***/
-SPLIT_API void label_points(
-  ScopedCuStream& io_stream,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
-    di_centroids,
-  cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view do_temp);
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END
