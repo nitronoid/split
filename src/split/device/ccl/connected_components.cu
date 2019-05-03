@@ -1,4 +1,8 @@
 #include "split/device/ccl/connected_components.cuh"
+#include "split/device/detail/matrix_functional.cuh"
+#include "split/device/detail/transposed_copy.cuh"
+#include "split/device/detail/unary_functional.cuh"
+#include "split/device/detail/zip_it.cuh"
 #include <thrust/iterator/transform_output_iterator.h>
 #include <cusp/transpose.h>
 #include <cusp/print.h>
@@ -9,80 +13,6 @@ namespace ccl
 {
 namespace
 {
-template <typename... Args>
-auto zip_it(Args&&... args) -> decltype(
-  thrust::make_zip_iterator(thrust::make_tuple(std::forward<Args>(args)...)))
-{
-  return thrust::make_zip_iterator(
-    thrust::make_tuple(std::forward<Args>(args)...));
-}
-
-struct transpose_index : public thrust::unary_function<int, int>
-{
-  const int height;
-  const int width;
-
-  transpose_index(int height, int width) : height(height), width(width)
-  {
-  }
-
-  __host__ __device__ int operator()(int i) const
-  {
-    const int x = i / width;
-    const int y = i % width;
-    return y * height + x;
-  }
-};
-
-// convert a linear index to a row index
-struct row_index : public thrust::unary_function<int, int>
-{
-  const int n;
-
-  __host__ __device__ row_index(int _n) : n(_n)
-  {
-  }
-
-  __host__ __device__ int operator()(int i)
-  {
-    return i / n;
-  }
-};
-
-// convert a linear index to a column index
-struct column_index : public thrust::unary_function<int, int>
-{
-  const int m;
-
-  __host__ __device__ column_index(int _m) : m(_m)
-  {
-  }
-
-  __host__ __device__ int operator()(int i)
-  {
-    return i % m;
-  }
-};
-
-void transpose(
-    int m,
-    int n,
-    cusp::array1d<int, cusp::device_memory>::view A, 
-    cusp::array1d<int, cusp::device_memory>::view At)
-{
-  auto indices = thrust::make_transform_iterator(
-      thrust::make_counting_iterator(0), transpose_index(n, m));
-  thrust::scatter(A.begin(), A.end(), indices, At.begin());
-}
-
-struct Decrement
-{
-  __host__ __device__ int operator()(int x)
-  {
-    return x - 1;
-  }
-};
-
 struct TupleEqual
 {
   __host__ __device__ bool operator()(const thrust::tuple<int, int>& lhs,
@@ -102,6 +32,49 @@ struct FindKey
       NULL, (lhs.get<0>() != rhs.get<0>()) || (lhs.get<1>() != rhs.get<1>()));
   }
 };
+
+template <typename EntryIt, typename KeyIt>
+void make_gather_indices(EntryIt&& entry_begin,
+                         EntryIt&& entry_end,
+                         KeyIt&& key_begin)
+{
+  // Discard iterator
+  auto discard_it = thrust::make_discard_iterator();
+  // Mark neighbors with different labels, or columns
+  thrust::adjacent_difference(
+    entry_begin, entry_end, detail::zip_it(discard_it, key_begin), FindKey{});
+  // First should always be a one
+  key_begin[0] = 1;
+  // Find the number of keys
+  const int nkeys = entry_end - entry_begin;
+  // Prefix-sum the marked locations to provide lookup indices
+  thrust::inclusive_scan(
+    key_begin,
+    key_begin + nkeys,
+    thrust::make_transform_output_iterator(key_begin, detail::unary_minus<int>(1)));
+}
+
+struct ComponentConvergence
+{
+  ComponentConvergence(thrust::device_ptr<int> i_max_begin,
+                       thrust::device_ptr<int> i_max_end,
+                       thrust::device_ptr<int> i_old_max_begin)
+    : maximums_begin(i_max_begin)
+    , maximums_end(i_max_end)
+    , old_maximums_begin(i_old_max_begin)
+  {
+  }
+
+  thrust::device_ptr<int> maximums_begin;
+  thrust::device_ptr<int> maximums_end;
+  thrust::device_ptr<int> old_maximums_begin;
+
+  bool operator()() const
+  {
+    return thrust::equal(maximums_begin, maximums_end, old_maximums_begin);
+  }
+};
+
 }  // namespace
 
 SPLIT_API void connected_components(
@@ -113,99 +86,67 @@ SPLIT_API void connected_components(
   const int npoints = di_labels.num_entries;
   const int width = di_labels.num_cols;
   const int height = di_labels.num_rows;
-  // Initialize the new labels to the point indices
-  thrust::sequence(do_labels.begin(), do_labels.end());
 
   // Convert our temporary storage pointer to an int pointer
   auto itemp_ptr =
     thrust::device_pointer_cast(static_cast<int*>(dio_temp.get()));
   // Temp storage for the row and column maximum indices, used to scatter back
-  //auto row_keys = cusp::make_array1d_view(itemp_ptr, itemp_ptr + npoints);
-  //auto col_keys =
-  //  cusp::make_array1d_view(itemp_ptr + npoints, itemp_ptr + npoints * 2);
-
-  cusp::array1d<int, cusp::device_memory> row_keys(npoints);
-  cusp::array1d<int, cusp::device_memory> col_keys(npoints);
+  auto row_keys = cusp::make_array1d_view(itemp_ptr, itemp_ptr + npoints);
+  auto col_keys =
+    cusp::make_array1d_view(itemp_ptr + npoints, itemp_ptr + npoints * 2);
 
   // Iterate over the row index and the labels simultaneously
-  auto row_indices = thrust::make_transform_iterator(
-    thrust::make_counting_iterator(0), row_index{width});
-  auto row_begin = zip_it(row_indices, di_labels.values.begin());
+  auto row_indices = detail::make_row_iterator(width);
+  auto row_begin = detail::zip_it(row_indices, di_labels.values.begin());
   auto row_end = row_begin + npoints;
 
   // Iterate over the column index and the labels simultaneously, using a
   // transposed view of the matrix
-  auto col_indices = thrust::make_transform_iterator(
-    thrust::make_counting_iterator(0), column_index{width});
-  auto transposed_indices = thrust::make_transform_iterator(
-    thrust::make_counting_iterator(0), transpose_index(width, height));
+  auto col_indices = detail::make_column_iterator(width);
+  auto transposed_indices = detail::make_transpose_iterator(height, width);
   auto col_begin = thrust::make_permutation_iterator(
-    zip_it(col_indices, di_labels.values.begin()), transposed_indices);
+    detail::zip_it(col_indices, di_labels.values.begin()), transposed_indices);
   auto col_end = col_begin + npoints;
 
-  auto discard_it = thrust::make_discard_iterator();
   // Calculate the gather indices
   // Row gather indices
-  thrust::adjacent_difference(
-    row_begin, row_end, zip_it(discard_it, row_keys.begin()), FindKey{});
-  row_keys[0] = 1;
-  thrust::inclusive_scan(
-    row_keys.begin(),
-    row_keys.end(),
-    thrust::make_transform_output_iterator(row_keys.begin(), Decrement{}));
+  make_gather_indices(row_begin, row_end, row_keys.begin());
   // Column gather indices
-  thrust::adjacent_difference(
-    col_begin, col_end, zip_it(discard_it, col_keys.begin()), FindKey{});
-  col_keys[0] = 1;
-  thrust::inclusive_scan(
-    col_keys.begin(),
-    col_keys.end(),
-    thrust::make_transform_output_iterator(col_keys.begin(), Decrement{}));
+  make_gather_indices(col_begin, col_end, col_keys.begin());
   // We can transpose this upfront to avoid a permutation iterator later
-  {
-    cusp::array1d<int, cusp::device_memory> col_cpy(col_keys.size());
-    transpose(height, width, col_keys, col_cpy);
-    thrust::copy(col_cpy.begin(), col_cpy.end(), col_keys.begin());
-  }
-  std::cout<<"here\n";
+  // Note we use the label memory here to avoid an extra allocation
+  detail::transposed_copy(height, width, col_keys, do_labels);
+  // Copy back to the column keys
+  thrust::copy(do_labels.begin(), do_labels.end(), col_keys.begin());
+
+  // Initialize the new labels to the point indices
+  thrust::sequence(do_labels.begin(), do_labels.end());
 
   const int nmaximums = max(col_keys.back(), row_keys.back()) + 1;
   // Temp storage for the row and column maximums
-  //auto max_ptr = col_keys.end();
-  //auto d_maximums = cusp::make_array1d_view(max_ptr, max_ptr + nmaximums);
-  //auto d_old_maximums =
-  //  cusp::make_array1d_view(max_ptr + nmaximums, max_ptr + nmaximums * 2);
-  thrust::device_vector<int> d_maximums(nmaximums);
-  thrust::device_vector<int> d_old_maximums(nmaximums);
-
-  // Make copies of these so we don't copy the entire arrays through the capture
-  auto maximums_begin = d_maximums.begin();
-  auto maximums_end = d_maximums.end();
-  auto old_maximums_begin = d_old_maximums.begin();
+  auto max_ptr = col_keys.end();
+  auto d_maximums = cusp::make_array1d_view(max_ptr, max_ptr + nmaximums);
+  auto d_maximum_buffer = max_ptr + nmaximums;
+  auto d_old_maximums = max_ptr + nmaximums * 2;
   // Set this to ensure we fail on first convergence check
-  *old_maximums_begin = -1;
-  // We've converged if our maximums for each column are the same as last time
-  auto has_converged = [=] {
-    return thrust::equal(maximums_begin, maximums_end, old_maximums_begin);
-  };
-  thrust::device_vector<int> max_buffer(nmaximums);
-  thrust::copy(maximums_begin, maximums_end, max_buffer.begin());
+  d_old_maximums[0] = -1;
 
+  // We've converged if our maximums for each column are the same as last time
+  ComponentConvergence has_converged(
+    d_maximums.begin(), d_maximums.end(), d_old_maximums);
   // Iterate until convergence
-  for (int iter = 0; iter < i_max_iterations/* && !has_converged()*/; ++iter)
+  for (int iter = 0; iter < i_max_iterations && !has_converged(); ++iter)
   {
     // Store the previous maximums to later check for convergence
-    thrust::copy(maximums_begin, maximums_end, old_maximums_begin);
+    thrust::copy(d_maximums.begin(), d_maximums.end(), d_old_maximums);
     // Reduce by row to find the maximum index of every cluster
     thrust::reduce_by_key(row_begin,
                           row_end,
                           do_labels.begin(),
-                          discard_it,
-                          max_buffer.begin(),
+                          thrust::make_discard_iterator(),
+                          d_maximum_buffer,
                           TupleEqual{},
                           thrust::maximum<int>());
-    thrust::gather(
-      row_keys.begin(), row_keys.end(), max_buffer.begin(), do_labels.begin());
     // Now repeat for the columns
     // Reduce by column to find the maximum index of every cluster, use a
     // permutation iterator to read the row maximums as the input labels
@@ -213,17 +154,15 @@ SPLIT_API void connected_components(
       col_begin,
       col_end,
       thrust::make_permutation_iterator(
-        do_labels.begin(),
+        thrust::make_permutation_iterator(d_maximum_buffer, row_keys.begin()),
         transposed_indices),
-      discard_it,
+      thrust::make_discard_iterator(),
       d_maximums.begin(),
       TupleEqual{},
       thrust::maximum<int>());
     // Gather the maximums as the new labels
     thrust::gather(
       col_keys.begin(), col_keys.end(), d_maximums.begin(), do_labels.begin());
-    //thrust::gather(
-    //  row_keys.begin(), row_keys.end(), max_buffer.begin(), do_labels.begin());
   }
 }
 
