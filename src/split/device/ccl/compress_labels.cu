@@ -30,7 +30,7 @@ compress_labels(cusp::array1d<int, cusp::device_memory>::view dio_labels,
                       dio_labels.end(),
                       dio_labels.begin());
   // Return the number of unique labels
-  return *(unique_label_end - 1);
+  return unique_label_end - d_labels.begin();
 }
 
 }  // namespace ccl

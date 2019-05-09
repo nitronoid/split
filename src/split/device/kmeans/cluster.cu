@@ -1,7 +1,9 @@
 #include "split/device/kmeans/cluster.cuh"
+#include <cusp/print.h>
 #include "split/device/kmeans/centroids.cuh"
 #include "split/device/kmeans/label.cuh"
 #include "split/device/detail/zip_it.cuh"
+#include "split/device/detail/view_util.cuh"
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
@@ -9,47 +11,37 @@ namespace kmeans
 {
 SPLIT_API void
 cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
-        cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-          dio_centroids,
+        cusp::array2d<real, cusp::device_memory>::view dio_centroids,
         cusp::array1d<int, cusp::device_memory>::view do_cluster_labels,
         thrust::device_ptr<void> do_temp,
         int i_max_iter,
         real i_threshold)
 {
   const int npoints = di_points.num_cols;
-  const int nclusters = dio_centroids.num_rows;
-
-  // Offset the real part pointer by the size of the integer part
-  auto d_rtemp_ptr =
-    thrust::device_pointer_cast(static_cast<real*>(do_temp.get()));
-  // Create a view over the real part
-  cusp::array1d<real, cusp::device_memory>::view d_rtemp(
-    d_rtemp_ptr, d_rtemp_ptr + npoints * nclusters);
-  // Create a dense, 2D, column major matrix view over the temp storage
-  auto d_temp_mat = cusp::make_array2d_view(
-    npoints, nclusters, 1, d_rtemp, cusp::column_major{});
+  const int nclusters = dio_centroids.num_cols;
+  const int dim = dio_centroids.num_rows;
 
   // Reuse the temporary storage again here to store our old centroids
   // NOTE: we offset the beginning of the sub-array as the start of our temp
   // memory is used for a radix sort every iteration.
+  auto d_rtemp = thrust::device_pointer_cast(
+    static_cast<real*>(do_temp.get()) + npoints * 2);
   auto d_old_centroids = cusp::make_array2d_view(
     dio_centroids.num_rows,
     dio_centroids.num_cols,
-    1,
-    d_rtemp.subarray(npoints * 2, nclusters * dio_centroids.num_cols),
-    cusp::column_major{});
+    dio_centroids.num_cols,
+    cusp::make_array1d_view(d_rtemp, d_rtemp + nclusters * dim),
+    cusp::row_major{});
 
   // Need to explicitly create an immutable view over the centroids
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::const_view
-    d_const_centroids(
-      dio_centroids.num_rows, dio_centroids.num_cols, 1, dio_centroids.values);
+  auto d_const_centroids = detail::make_const_array2d_view(dio_centroids);
 
-  auto centroid_it = detail::zip_it(dio_centroids.column(0).begin(),
-                                    dio_centroids.column(1).begin(),
-                                    dio_centroids.column(2).begin());
-  auto old_centroid_it = detail::zip_it(d_old_centroids.column(0).begin(),
-                                        d_old_centroids.column(1).begin(),
-                                        d_old_centroids.column(2).begin());
+  auto centroid_it = detail::zip_it(dio_centroids.row(0).begin(),
+                                    dio_centroids.row(1).begin(),
+                                    dio_centroids.row(2).begin());
+  auto old_centroid_it = detail::zip_it(d_old_centroids.row(0).begin(),
+                                        d_old_centroids.row(1).begin(),
+                                        d_old_centroids.row(2).begin());
 
   real old_delta, delta = 1.f;
   int iter = 0;
@@ -58,7 +50,7 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
     ++iter;
     // Assign each pixel to it's nearest centroid
     split::device::kmeans::label_points(
-      d_const_centroids, di_points, do_cluster_labels, d_temp_mat);
+      d_const_centroids, di_points, do_cluster_labels, do_temp);
     // Copy our centroids before calculating the new ones
     thrust::copy(dio_centroids.values.begin(),
                  dio_centroids.values.end(),
@@ -83,10 +75,10 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
         return sqrt(v.get<0>() * v.get<0>() + v.get<1>() * v.get<1>() +
                     v.get<2>() * v.get<2>());
       });
-  } while ((iter < i_max_iter) && ((delta / old_delta) < (1.f + i_threshold)));
+  } while ((iter < i_max_iter) && ((delta / old_delta) > i_threshold));
 
-  std::cout << "Achieved variance of: " << (delta / old_delta) << ", in "
-            << iter << " iterations\n";
+  printf(
+    "Achieved variance of: %f, in %d iterations.\n", (delta / old_delta), iter);
 }
 }  // namespace kmeans
 

@@ -1,4 +1,6 @@
 #include "split/device/ccl/merge_insignificant.cuh"
+#include "split/device/detail/segment_length.cuh"
+#include "split/device/detail/zip_it.cuh"
 #include <cusp/graph/connected_components.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
@@ -56,41 +58,46 @@ struct TargetMap
   const int thresh;
 
   // Packed => { target, current, size }
-  __host__ __device__ int operator()(const thrust::tuple<int, int, int>& tup)
+  struct TargetMapParams
   {
-    return tup.get<2>() > thresh ? tup.get<1>() : tup.get<0>();
+    TargetMapParams(const thrust::tuple<int, int, int>& tup)
+      : target(tup.get<0>()), current(tup.get<1>()), size(tup.get<2>())
+    {
+    }
+    int target;
+    int current;
+    int size;
+  };
+
+  // If we're big enough, then set our current label as the target for no
+  // change, otherwise return the provided target label
+  __host__ __device__ int operator()(const TargetMapParams& params)
+  {
+    return params.size > thresh ? params.current : params.target;
   }
 };
-
-template <typename... Args>
-auto zip_it(Args&&... args) -> decltype(
-  thrust::make_zip_iterator(thrust::make_tuple(std::forward<Args>(args)...)))
-{
-  return thrust::make_zip_iterator(
-    thrust::make_tuple(std::forward<Args>(args)...));
-}
 
 }  // namespace
 
 SPLIT_API void merge_insignificant(
-  cusp::array1d<real, cusp::device_memory>::view di_chrominance,
+  cusp::array2d<real, cusp::device_memory>::view di_chrominance,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_labels,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency_keys,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency,
-  cusp::array1d<int, cusp::device_memory>::view dio_segment_size,
   int P)
 {
   // Get these sizes upfront
   const int nsegments = dio_segment_adjacency_keys.back() + 1;
   const int npoints = dio_segment_labels.size();
   // Push these into temp storage param eventually
-  cusp::array1d<real, cusp::device_memory> total_chrominance(nsegments * 2);
+  cusp::array2d<real, cusp::device_memory> total_chrominance(2, nsegments);
+  cusp::array1d<int, cusp::device_memory> segment_sizes(nsegments);
+
   cusp::array1d<int, cusp::device_memory> indices(npoints);
   cusp::array1d<int, cusp::device_memory> labels(npoints);
   // Target array contains the target segment to join with, initially no change
-  cusp::array1d<int, cusp::device_memory> d_targets = dio_segment_labels;
-
-  // Useful iterators
+  cusp::array1d<int, cusp::device_memory> d_targets(nsegments);
+  thrust::sequence(d_targets.begin(), d_targets.end());
 
   // Initialize the indices with a standard sequence
   thrust::sequence(indices.begin(), indices.end());
@@ -99,23 +106,17 @@ SPLIT_API void merge_insignificant(
     dio_segment_labels.begin(), dio_segment_labels.end(), labels.begin());
   // Sort the indices using the labels
   thrust::sort_by_key(labels.begin(), labels.begin(), indices.begin());
-
-  // Counting iterator
-  auto count = thrust::make_counting_iterator(0);
-  // Segment size range iterators
-  auto size_begin = dio_segment_size.begin();
-  auto size_end = dio_segment_size.end();
   // Compute the segment sizes
-  thrust::upper_bound(
-    count, count + nsegments, labels.begin(), labels.end(), size_begin);
-  thrust::adjacent_difference(size_begin, size_end, size_begin);
+  detail::segment_length(
+    labels.begin(), labels.end(), nsegments, segment_sizes.begin());
 
   // Access the chrominance using the sorted indices
   auto value_it = thrust::make_permutation_iterator(
-    zip_it(di_chrominance.begin(), di_chrominance.begin() + npoints),
+    detail::zip_it(di_chrominance.row(0).begin(),
+                   di_chrominance.row(1).begin()),
     indices.begin());
-  auto total_it =
-    zip_it(total_chrominance.begin(), total_chrominance.begin() + nsegments);
+  auto total_it = detail::zip_it(total_chrominance.row(0).begin(),
+                                 total_chrominance.row(1).begin());
   auto discard_it = thrust::make_discard_iterator();
   // Reduce all segments to get their total chrominance
   thrust::reduce_by_key(labels.begin(),
@@ -125,23 +126,22 @@ SPLIT_API void merge_insignificant(
                         total_it,
                         thrust::equal_to<int>(),
                         AddPair{});
-
   // Iterator to access the average chrominance of each segment
   auto average_chrominance = thrust::make_transform_iterator(
-    zip_it(total_chrominance.begin(),
-           total_chrominance.begin() + nsegments,
-           size_begin),
+    detail::zip_it(total_chrominance.row(0).begin(),
+                   total_chrominance.row(1).begin(),
+                   segment_sizes.begin()),
     [] __device__(const thrust::tuple<real, real, int>& tc) {
-      return thrust::make_tuple(tc.get<0>() / tc.get<2>(),
-                                tc.get<1>() / tc.get<2>());
+      const real denom = 1.f / tc.get<2>();
+      return thrust::make_tuple(tc.get<0>() * denom, tc.get<1>() * denom);
     });
   // Get matrix values as squared distance in chrominance space
   auto entry_it = thrust::make_transform_iterator(
-    zip_it(thrust::make_permutation_iterator(
-             average_chrominance, dio_segment_adjacency_keys.begin()),
-           thrust::make_permutation_iterator(average_chrominance,
-                                             dio_segment_adjacency.begin()),
-           dio_segment_adjacency.begin()),
+    detail::zip_it(thrust::make_permutation_iterator(
+                     average_chrominance, dio_segment_adjacency_keys.begin()),
+                   thrust::make_permutation_iterator(
+                     average_chrominance, dio_segment_adjacency.begin()),
+                   dio_segment_adjacency.begin()),
     ChominanceDistance2{});
 
   // Reduce by column to find the lowest distance, and hence nearest in
@@ -151,7 +151,7 @@ SPLIT_API void merge_insignificant(
                         dio_segment_adjacency_keys.end(),
                         entry_it,
                         discard_it,
-                        zip_it(discard_it, d_targets.begin()),
+                        detail::zip_it(discard_it, d_targets.begin()),
                         thrust::equal_to<int>(),
                         thrust::minimum<thrust::tuple<real, int>>());
 
@@ -165,11 +165,13 @@ SPLIT_API void merge_insignificant(
   // using a transform functor to decide the final target to write
   auto target_it = thrust::make_transform_iterator(
     thrust::make_permutation_iterator(
-      zip_it(d_targets.begin(), dio_segment_labels.begin(), size_begin),
+      detail::zip_it(d_targets.begin(),
+                     thrust::make_counting_iterator(0),
+                     segment_sizes.begin()),
       dio_segment_labels.begin()),
     TargetMap{P});
   // An iterator that provides a mapping from current to target labels
-  auto map_it = zip_it(dio_segment_labels.begin(), target_it);
+  auto map_it = detail::zip_it(dio_segment_labels.begin(), target_it);
   // Loop until convergence
   while (!has_converged())
   {

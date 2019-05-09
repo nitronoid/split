@@ -10,15 +10,14 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 namespace ccl
 {
 /***
-   @brief Merges any small segments (valence < P), with their nearest neighbor,
+   @brief Merges any small segments (size < P), with their nearest neighbor,
    measured via closest average chrominance.
    ***/
 SPLIT_API void merge_insignificant(
-  cusp::array1d<real, cusp::device_memory>::view di_chrominance,
+  cusp::array2d<real, cusp::device_memory>::view di_chrominance,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_labels,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency_keys,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency,
-  cusp::array1d<int, cusp::device_memory>::view dio_segment_size,
   int P = 10);
 
 }  // namespace ccl

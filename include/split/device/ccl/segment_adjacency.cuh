@@ -13,8 +13,8 @@ namespace ccl
    @brief Builds an edge list of pixels that connect two segments.
    ***/
 SPLIT_API int segment_adjacency_edges(
-  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<int, cusp::device_memory>::const_view do_edges);
+  cusp::array2d<int, cusp::device_memory>::const_view di_labels,
+  cusp::array2d<int, cusp::device_memory>::view do_edges);
 
 /***
    @brief Builds adjacency lists of the segment to segment adjacency.
@@ -23,9 +23,7 @@ SPLIT_API int segment_adjacency(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<int, cusp::device_memory>::const_view di_edges,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency_keys,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_valence,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_cumulative_valence);
+  cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency);
 
 }  // namespace ccl
 

@@ -1,4 +1,5 @@
-#include "split/device/ccl/point_point_adjacency.cuh"
+#include "split/device/ccl/segment_adjacency.cuh"
+#include "split/device/detail/zip_it.cuh"
 #include <cusp/graph/connected_components.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
@@ -10,86 +11,116 @@ namespace
 struct alignas(32) int8
 {
   int8() = default;
-  int8(int32_t i)
-    : x(i)
-    , y(i)
-    , z(i)
-    , w(i)
-    , a(i)
-    , b(i)
-    , c(i)
-    , d(i)
-  {}
+  int8(int32_t i) : x(i), y(i), z(i), w(i), a(i), b(i), c(i), d(i)
+  {
+  }
 
-  int8(int32_t x, int32_t y, int32_t z, int32_t w, int32_t a, int32_t b, int32_t c, int32_t d)
-    : x(x)
-    , y(y)
-    , z(z)
-    , w(w)
-    , a(a)
-    , b(b)
-    , c(c)
-    , d(d)
-  {}
+  int8(int32_t x,
+       int32_t y,
+       int32_t z,
+       int32_t w,
+       int32_t a,
+       int32_t b,
+       int32_t c,
+       int32_t d)
+    : x(std::move(x))
+    , y(std::move(y))
+    , z(std::move(z))
+    , w(std::move(w))
+    , a(std::move(a))
+    , b(std::move(b))
+    , c(std::move(c))
+    , d(std::move(d))
+  {
+  }
 
   int32_t x, y, z, w, a, b, c, d;
 };
-}
 
+struct NeighbourKeys
+{
+  NeighbourKeys() = default;
+  NeighbourKeys(int h, int w) : height(h), width(w)
+  {
+  }
+  int32_t height;
+  int32_t width;
+
+  __host__ __device__ thrust::tuple<int8, int8> operator()(int i) const
+  {
+    const int32_t x = i % width;
+    const int32_t y = i / width;
+
+    const bool is_left = x == 0;
+    const bool is_right = x == width - 1;
+    const bool is_upper = y == 0;
+    const bool is_lower = y == height - 1;
+
+    const int8 a(i >> 3);
+    const int8 b((!is_left && !is_upper) ? i - width - 1 : -1,
+                 (!is_upper) ? i - width + 0 : -1,
+                 (!is_right && !is_upper) ? i - width + 1 : -1,
+                 (!is_left) ? i - 1 : -1,
+                 (!is_right) ? i + 1 : -1,
+                 (!is_left && !is_lower) ? i + width - 1 : -1,
+                 (!is_lower) ? i + width + 0 : -1,
+                 (!is_right && !is_lower) ? i + width + 1 : -1);
+    return thrust::make_tuple(a, b);
+  }
+};
+
+struct UniqueConnections
+{
+  UniqueConnections() = default;
+  UniqueConnections(const int* labels) : labels(labels)
+  {
+  }
+  const int* labels;
+
+  using Tup2 = thrust::tuple<int, int>;
+  __host__ __device__ bool operator()(const Tup2& lhs, const Tup2& rhs) const
+  {
+    return lhs.get<0>() == rhs.get<0>() &&
+           labels[lhs.get<1>()] == labels[rhs.get<1>()];
+  }
+};
+
+}  // namespace
 
 SPLIT_API int segment_adjacency_edges(
-  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<int, cusp::device_memory>::const_view do_edges)
+  cusp::array2d<int, cusp::device_memory>::const_view di_labels,
+  cusp::array2d<int, cusp::device_memory>::view do_edges)
 {
-
+  const int npoints = di_labels.num_entries;
   {
-  // Read the edges as packed 4 tuples
-  auto edge8_ptr = thrust::device_pointer_cast(
+    // Read the edges as packed 4 tuples
+    auto edge8_ptr = thrust::device_pointer_cast(
       reinterpret_cast<int8*>(do_edges.values.begin().base().get()));
 
-  auto edge8_begin = utils::zip_it(edge8_ptr,
-                                   edge8_ptr + di_labels.size());
-  auto edge8_end = edge_begin + di_labels.size() * 8;
+    auto edge8_begin = detail::zip_it(edge8_ptr, edge8_ptr + npoints);
+    auto edge8_end = edge8_begin + npoints * 8;
 
-  // Fill the first half of every edge with a simple sequence, 
-  // and the second half with the 8 nieghbour hood
-  thrust::tabulate(edge8_begin, edge8_end, [] __device__ (int i)
-      {
-        const int32_t x = i % width;
-        const int32_t y = i / width;
-
-        const bool is_left = x == 0;
-        const bool is_right = x == width - 1;
-        const bool is_upper = y == 0;
-        const bool is_lower = y == height - 1;
-
-
-        const int8 a(i >> 3);
-        const int8 b(
-          (!is_left && !is_upper) ? i - width - 1 : -1,
-          (!is_upper) ? i - width + 0 : -1,
-          (!is_right && !is_upper) ? i - width + 1 : -1,
-          (!is_left) ? i - 1 : -1,
-          (!is_right) ? i + 1 : -1,
-          (!is_left && !is_lower) ? i + width - 1 : -1,
-          (!is_lower) ? i + width + 0 : -1,
-          (!is_right && !is_lower) ? i + width + 1 : -1,
-          );
-        return thrust::make_tuple(a, b);
-      });
+    // Fill the first half of every edge with a simple sequence,
+    // and the second half with the 8 nieghbour hood
+    thrust::tabulate(edge8_begin,
+                     edge8_end,
+                     NeighbourKeys(di_labels.num_rows, di_labels.num_cols));
   }
 
   // Iterate only over the cluster boundary pixels
-  auto edge_begin = utils::zip_it(di_edges.row(0).begin(),
-                                  di_edges.row(1).begin());
-  auto edge_end = edge_begin + di_labels.size() * 8;
-  auto labels = di_labels.begin();
+  auto edge_begin =
+    detail::zip_it(do_edges.row(0).begin(), do_edges.row(1).begin());
+  auto edge_end = edge_begin + npoints * 8;
+  auto labels = di_labels.values.begin().base().get();
   // Remove any edges accessing out of bounds, or edges internal to a cluster
-  auto new_end = thrust::remove_if(edge_begin, edge_end,
-      [=] __device__ (const thrust::tuple<int, int>& pair)
-      {
-        return pair.get<1>() < 0 || labels[pair.get<0>()] == labels[pair.get<1>()];
-      });
+  auto new_end = thrust::remove_if(
+    edge_begin, edge_end, [=] __device__(const thrust::tuple<int, int>& pair) {
+      return pair.get<1>() < 0 ||
+             labels[pair.get<0>()] == labels[pair.get<1>()];
+    });
+
+  // Remove any edges stemming from the same pixel, that end in a common segment
+  new_end = thrust::unique(edge_begin, new_end, UniqueConnections(labels));
 
   return new_end - edge_begin;
 }
@@ -98,19 +129,34 @@ SPLIT_API int segment_adjacency(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<int, cusp::device_memory>::const_view di_edges,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency_keys,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_valence,
-  cusp::array1d<int, cusp::device_memory>::view do_segment_cumulative_valence)
+  cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency)
 {
-  // Iterate only over the cluster boundary pixels
-  auto edge_it = utils::zip_it(di_edges.row(0).begin(),
-                               di_edges.row(1).begin());
+  // Look-up the segment labels for each end of an edge
+  auto edge_label_it = thrust::make_permutation_iterator(
+    di_labels.begin(), di_edges.values.begin());
+  // Iterate over the edge label pairs
+  auto edge_begin =
+    detail::zip_it(edge_label_it, edge_label_it + di_edges.num_cols);
+  auto edge_end = edge_begin + di_edges.num_cols;
+  // Iterate over pairs of adjacency keys and values
+  auto adj_begin = detail::zip_it(do_segment_adjacency_keys.begin(),
+                                  do_segment_adjacency.begin());
+  auto adj_end = adj_begin + di_edges.num_cols;
+  // Copy the edge labels into our adjacency lists
+  thrust::copy(edge_begin, edge_end, adj_begin);
+  // Sort by value and then stable sort by key so our duplicate edges are
+  // neighboring
+  thrust::sort_by_key(
+    do_segment_adjacency.begin(), do_segment_adjacency.end(), adj_begin);
+  thrust::stable_sort_by_key(do_segment_adjacency_keys.begin(),
+                             do_segment_adjacency_keys.end(),
+                             adj_begin);
+  // The result of unique edge labels, is the segment adjacency list
+  auto new_end = thrust::unique(adj_begin, adj_end);
 
-  
-
+  return new_end - adj_begin;
 }
 }  // namespace ccl
-
 
 SPLIT_DEVICE_NAMESPACE_END
 

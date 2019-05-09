@@ -1,5 +1,7 @@
 #include "split/device/kmeans/initialize.cuh"
+#include "split/device/detail/zip_it.cuh"
 #include <thrust/random.h>
+#include <cusp/print.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
@@ -7,18 +9,31 @@ namespace kmeans
 {
 SPLIT_API void initialize_centroids(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-    do_centroids)
+  cusp::array2d<real, cusp::device_memory>::view do_centroids)
 {
   // Get these up front
   const int ndimensions = di_points.num_rows;
   const int npoints = di_points.num_cols;
-  const int ncentroids = do_centroids.num_rows;
+  const int ncentroids = do_centroids.num_cols;
 
   // Pointer to the centroids
   auto centroid_ptr = do_centroids.values.begin().base().get();
   // Pointer to the points
   auto point_ptr = di_points.values.begin().base().get();
+
+  auto point_begin = detail::zip_it(di_points.row(0).begin(),
+                                    di_points.row(1).begin(),
+                                    di_points.row(2).begin());
+  auto point_end = point_begin + di_points.num_cols;
+  // cusp::array2d<real, cusp::device_memory> unique_points(di_points.num_rows,
+  //                                                       di_points.num_cols);
+  // auto unique_begin = detail::zip_it(unique_points.row(0).begin(),
+  //                                   unique_points.row(1).begin(),
+  //                                   unique_points.row(2).begin());
+  // auto unique_end = thrust::unique_copy(point_begin, point_end,
+  // unique_begin); auto uniquep_ptr = unique_points.values.begin().base().get();
+  // const int nunique = unique_end - unique_begin;
+  // std::cout<<nunique<<'\n';
 
   // For selecting the random points as initial centroids
   thrust::default_random_engine rng(time(NULL));

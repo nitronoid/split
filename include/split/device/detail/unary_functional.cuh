@@ -8,6 +8,15 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 namespace detail
 {
 template <typename T>
+struct reciprocal
+{
+  __host__ __device__ T operator()(T i_rhs) const
+  {
+    return T(1) / i_rhs;
+  }
+};
+
+template <typename T>
 struct unary_modulo
 {
   unary_modulo(T i_rhs) : rhs(i_rhs)

@@ -13,14 +13,13 @@ namespace kmeans
    @param di_points A 2D, dense, row major matrix containing the points to
    cluster. This data is stored with each dimension of the data point being
    represented by a new row. This matrix is stored in device memory.
-   @param do_centroids A 2D, dense, column major matrix containing the randomly
+   @param do_centroids A 2D, dense, row major matrix containing the randomly
    selected points, acting as the initial seeding for clustering. This matrix is
    stored in device memory.
    ***/
 SPLIT_API void initialize_centroids(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-    do_centroids);
+  cusp::array2d<real, cusp::device_memory>::view do_centroids);
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END

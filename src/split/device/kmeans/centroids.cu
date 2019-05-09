@@ -3,9 +3,11 @@
 #include "split/device/detail/cycle_iterator.cuh"
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/transform_output_iterator.h>
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <algorithm>
+#include <cusp/print.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
@@ -14,52 +16,54 @@ namespace kmeans
 SPLIT_API void calculate_centroids(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-    do_centroids,
+  cusp::array2d<real, cusp::device_memory>::view do_centroids,
   thrust::device_ptr<void> do_temp)
 {
   // Store the number of points
   const int npoints = di_points.num_cols;
   // Store the number of centroids
-  const int ncentroids = di_points.num_cols;
+  const int ncentroids = do_centroids.num_cols;
 
   // Cast our temp memory to integer storage
   auto itemp = thrust::device_pointer_cast(static_cast<int*>(do_temp.get()));
-  auto itemp_array =
-    cusp::make_array1d_view(itemp, itemp + npoints * 2 + ncentroids);
-
+  // Cast our temp memory to real storage
+  auto rtemp = thrust::device_pointer_cast(static_cast<real*>(do_temp.get()));
   // Make a copy of our input labels, storing it in the temp memory provided
-  auto labels_copy = itemp_array.subarray(0, npoints);
+  auto labels_copy = cusp::make_array1d_view(itemp, itemp + npoints);
   thrust::copy(di_labels.begin(), di_labels.end(), labels_copy.begin());
-
   // Initialize the point indices to a standard sequence, for sorting later
-  auto indices = itemp_array.subarray(npoints, npoints);
+  auto indices = cusp::make_array1d_view(itemp + npoints, itemp + npoints * 2);
   thrust::sequence(indices.begin(), indices.end());
+  // Create a new sub view into our temp memory for storing cluster valence
+  auto rvalence = cusp::make_array1d_view(rtemp + npoints * 2,
+                                          rtemp + npoints * 2 + ncentroids);
 
   // Sort by label, we use the copy here to avoid modifying the input labels
   thrust::sort_by_key(labels_copy.begin(), labels_copy.end(), indices.begin());
 
-  // Create a new sub view into our temp memory for storing cluster valence
-  auto valence = itemp_array.subarray(npoints * 2, ncentroids);
   // Create a counting iter to output the index values from the upper_bound
   auto search_begin = thrust::make_counting_iterator(0);
   // Calculate a dense histogram to find the cumulative valence
   thrust::upper_bound(labels_copy.begin(),
                       labels_copy.end(),
                       search_begin,
-                      search_begin + valence.size(),
-                      valence.begin());
-  // Calculate the non-cumulative valence by subtracting neighboring elements
-  thrust::adjacent_difference(valence.begin(), valence.end(), valence.begin());
+                      search_begin + rvalence.size(),
+                      rvalence.begin());
+  // Calculate the non-cumulative valence by subtracting neighboring elements,
+  // and then write out the reciprocal using a transform functor
+  thrust::adjacent_difference(rvalence.begin(),
+                              rvalence.end(),
+                              thrust::make_transform_output_iterator(
+                                rvalence.begin(), detail::reciprocal<real>()));
 
   // Initialize the centroids to the origin, in-case of no points belonging to
   // that cluster, we have zero rather than an uninitialized value
   thrust::fill(do_centroids.values.begin(), do_centroids.values.end(), 0.f);
 
   // Iterate over all channels at once
-  auto centroid_it = detail::zip_it(do_centroids.column(0).begin().base(),
-                                    do_centroids.column(1).begin().base(),
-                                    do_centroids.column(2).begin().base());
+  auto centroid_it = detail::zip_it(do_centroids.row(0).begin().base(),
+                                    do_centroids.row(1).begin().base(),
+                                    do_centroids.row(2).begin().base());
   auto pixel_it = detail::zip_it(di_points.row(0).begin(),
                                  di_points.row(1).begin(),
                                  di_points.row(2).begin());
@@ -79,33 +83,15 @@ SPLIT_API void calculate_centroids(
                                 lhs.get<2>() + rhs.get<2>());
     });
 
-  // auto valence_it = thrust::make_transform_iterator(
-  //  thrust::make_permutation_iterator(
-  //    valence.begin(), detail::make_cycle_iterator(valence.size())),
-  //  [] __host__ __device__(int x) -> real { return 1.f / x; });
-
-  // std::cout << valence_it[0] << ' ' << valence_it[1] << '\n';
-  // valence_it += valence.size();
-  // std::cout << valence_it[0] << ' ' << valence_it[1] << '\n';
-  // valence_it += valence.size();
-  // std::cout << valence_it[0] << ' ' << valence_it[1] << '\n';
-
-  // thrust::transform(do_centroids.values.begin(),
-  //                  do_centroids.values.end(),
-  //                  valence_it,
-  //                  do_centroids.values.begin(),
-  //                  thrust::multiplies<real>());
-
-  thrust::transform(
-    centroid_it,
-    centroid_it + do_centroids.num_rows,
-    thrust::make_transform_iterator(
-      valence.begin(),
-      [] __host__ __device__(int x) -> real { return 1.f / x; }),
-    centroid_it,
-    [] __device__(const thrust::tuple<real, real, real>& v, real c) {
-      return thrust::make_tuple(v.get<0>() * c, v.get<1>() * c, v.get<2>() * c);
-    });
+  // Loop over the reciprocal valence for each dimension of the input data
+  auto rvalence_it =
+    detail::make_cycle_iterator(rvalence.begin(), rvalence.size());
+  // Divide each dimension of the totals, by their number of contributions
+  thrust::transform(do_centroids.values.begin(),
+                    do_centroids.values.end(),
+                    rvalence_it,
+                    do_centroids.values.begin(),
+                    thrust::multiplies<real>());
 }
 }  // namespace kmeans
 

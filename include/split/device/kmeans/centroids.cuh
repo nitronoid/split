@@ -18,7 +18,7 @@ namespace kmeans
    @param di_points A 2D, dense, row major matrix containing the points to
    cluster. This data is stored with each dimension of the data point being
    represented by a new row. This matrix is stored in device memory.
-   @param do_centroids A 2D, dense, column major matrix containing the centroids
+   @param do_centroids A 2D, dense, row major matrix containing the centroids
    calculated using the labeled clusters. This matrix is stored in device
    memory.
    @param do_temp A pointer to temporary storage, so that we can perform a radix
@@ -27,8 +27,7 @@ namespace kmeans
 SPLIT_API void calculate_centroids(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
-  cusp::array2d<real, cusp::device_memory, cusp::column_major>::view
-    do_centroids,
+  cusp::array2d<real, cusp::device_memory>::view do_centroids,
   thrust::device_ptr<void> do_temp);
 
 }  // namespace kmeans
