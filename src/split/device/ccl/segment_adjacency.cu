@@ -112,7 +112,7 @@ SPLIT_API int segment_adjacency_edges(
     });
 
   // Remove any edges stemming from the same pixel, that end in a common segment
-  new_end = thrust::unique(edge_begin, new_end, UniqueConnections(labels));
+  //new_end = thrust::unique(edge_begin, new_end, UniqueConnections(labels));
   // Copy the targets of each edge, to the memory immediately after the source
   // of each edge.
   thrust::copy(edge_begin.get_iterator_tuple().get<1>(),

@@ -25,7 +25,7 @@ void segment_length(InputIterator&& input_begin,
   auto count = thrust::make_counting_iterator(0);
   // Find the cumulative length of each segment
   thrust::upper_bound(
-    count, count + num_segments, input_begin, input_end, cumulative_length);
+    input_begin, input_end, count, count + num_segments, cumulative_length);
   // Compute the length of each segment
   thrust::adjacent_difference(
     cumulative_length, cumulative_length + num_segments, length);

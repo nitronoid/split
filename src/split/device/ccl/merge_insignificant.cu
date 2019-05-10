@@ -92,24 +92,21 @@ SPLIT_API void merge_insignificant(
   assert(npoints == di_chrominance.num_cols);
   // Push these into temp storage param eventually
   cusp::array2d<real, cusp::device_memory> total_chrominance(2, nsegments);
-  cusp::array1d<int, cusp::device_memory> segment_sizes(nsegments);
+  cusp::array1d<int, cusp::device_memory> segment_sizes(nsegments+1);
 
   cusp::array1d<int, cusp::device_memory> indices(npoints);
   cusp::array1d<int, cusp::device_memory> labels(npoints);
   // Target array contains the target segment to join with, initially no change
   cusp::array1d<int, cusp::device_memory> d_targets(nsegments);
   thrust::sequence(d_targets.begin(), d_targets.end());
-  printf("DEBUG: %d\n", __LINE__);
 
   // Initialize the indices with a standard sequence
   thrust::sequence(indices.begin(), indices.end());
   // Copy our labels for sorting
   thrust::copy(
     dio_segment_labels.begin(), dio_segment_labels.end(), labels.begin());
-  printf("DEBUG: %d\n", __LINE__);
   // Sort the indices using the labels
-  thrust::sort_by_key(labels.begin(), labels.begin(), indices.begin());
-  printf("DEBUG: %d\n", __LINE__);
+  thrust::sort_by_key(labels.begin(), labels.end(), indices.begin());
 
   // Access the chrominance using the sorted indices
   auto value_it = thrust::make_permutation_iterator(
@@ -120,10 +117,6 @@ SPLIT_API void merge_insignificant(
                                  total_chrominance.row(1).begin());
   auto discard_it = thrust::make_discard_iterator();
 
-
-  int mine = *thrust::min_element(labels.begin(), labels.begin());
-  std::cout<<"min: "<<mine<<'\n';
-  cusp::print(labels.subarray(0,25));
   // Reduce all segments to get their total chrominance
   thrust::reduce_by_key(labels.begin(),
                         labels.begin() + npoints,
@@ -132,11 +125,10 @@ SPLIT_API void merge_insignificant(
                         total_it,
                         thrust::equal_to<int>(),
                         AddPair{});
-  printf("DEBUG: %d\n", __LINE__);
+
   // Compute the segment sizes
   detail::segment_length(
     labels.begin(), labels.end(), nsegments, segment_sizes.begin());
-  printf("DEBUG: %d\n", __LINE__);
   // Iterator to access the average chrominance of each segment
   auto average_chrominance = thrust::make_transform_iterator(
     detail::zip_it(total_chrominance.row(0).begin(),
@@ -154,11 +146,11 @@ SPLIT_API void merge_insignificant(
                      average_chrominance, di_segment_adjacency.begin()),
                    di_segment_adjacency.begin()),
     ChominanceDistance2{});
-  printf("DEBUG: %d\n", __LINE__);
 
   // Reduce by column to find the lowest distance, and hence nearest in
   // chrominance space to our segment, this is the segment we want to merge
   // with.
+  printf("DEBUG: %d\n", __LINE__);
   thrust::reduce_by_key(di_segment_adjacency_keys.begin(),
                         di_segment_adjacency_keys.end(),
                         entry_it,
@@ -169,9 +161,9 @@ SPLIT_API void merge_insignificant(
   printf("DEBUG: %d\n", __LINE__);
 
   // We have converged if all segments have size greater than or equal to P
-  auto has_converged = [old_labels = labels.begin(),
-                        new_labels = dio_segment_labels.begin(),
-                        npoints = npoints] {
+  auto old_labels = labels.begin();
+  auto new_labels = dio_segment_labels.begin();
+  auto has_converged = [=] {
     return thrust::equal(new_labels, new_labels + npoints, old_labels);
   };
   // Iterate over the target and current labels, with the current segment size,
@@ -188,7 +180,10 @@ SPLIT_API void merge_insignificant(
   // Loop until convergence
   while (!has_converged())
   {
+  cudaDeviceSynchronize();
+  printf("DEBUG: %d\n", __LINE__);
     thrust::copy_n(dio_segment_labels.begin(), npoints, labels.begin());
+  printf("DEBUG: %d\n", __LINE__);
     // Merge segments by replacing their labels with the target labels, if the
     // segment is small (size < P)
     thrust::transform(
@@ -198,6 +193,8 @@ SPLIT_API void merge_insignificant(
       thrust::make_permutation_iterator(d_targets.begin(), target_it),
       dio_segment_labels.begin(),
       MergeSegment{});
+  cudaDeviceSynchronize();
+  printf("DEBUG: %d\n", __LINE__);
   }
   printf("DEBUG: %d\n", __LINE__);
 }

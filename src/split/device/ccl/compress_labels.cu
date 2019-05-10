@@ -29,7 +29,6 @@ compress_labels(cusp::array1d<int, cusp::device_memory>::view dio_labels,
                       dio_labels.begin(),
                       dio_labels.end(),
                       dio_labels.begin());
-  cusp::print(dio_labels.subarray(1000, 1000));
 
   // Return the number of unique labels
   return unique_label_end - d_labels.begin();
