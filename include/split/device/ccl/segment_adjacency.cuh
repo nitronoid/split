@@ -14,7 +14,7 @@ namespace ccl
    ***/
 SPLIT_API int segment_adjacency_edges(
   cusp::array2d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<int, cusp::device_memory>::view do_edges);
+  cusp::array1d<int, cusp::device_memory>::view do_edges);
 
 /***
    @brief Builds adjacency lists of the segment to segment adjacency.

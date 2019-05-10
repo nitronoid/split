@@ -14,10 +14,10 @@ namespace ccl
    measured via closest average chrominance.
    ***/
 SPLIT_API void merge_insignificant(
-  cusp::array2d<real, cusp::device_memory>::view di_chrominance,
+  cusp::array2d<real, cusp::device_memory>::const_view di_chrominance,
+  cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency_keys,
+  cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_labels,
-  cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency_keys,
-  cusp::array1d<int, cusp::device_memory>::view dio_segment_adjacency,
   int P = 10);
 
 }  // namespace ccl
