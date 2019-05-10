@@ -56,24 +56,14 @@ struct MergeSegment
 struct TargetMap
 {
   const int thresh;
-
   // Packed => { target, current, size }
-  struct TargetMapParams
-  {
-    TargetMapParams(const thrust::tuple<int, int, int>& tup)
-      : target(tup.get<0>()), current(tup.get<1>()), size(tup.get<2>())
-    {
-    }
-    int target;
-    int current;
-    int size;
-  };
-
   // If we're big enough, then set our current label as the target for no
   // change, otherwise return the provided target label
-  __host__ __device__ int operator()(const TargetMapParams& params)
+  __host__ __device__ thrust::tuple<int, int>
+  operator()(const thrust::tuple<int, int, int>& tup)
   {
-    return params.size > thresh ? params.current : params.target;
+    return thrust::make_tuple(
+      tup.get<1>(), tup.get<2>() > thresh ? tup.get<1>() : tup.get<0>());
   }
 };
 
@@ -92,7 +82,7 @@ SPLIT_API void merge_insignificant(
   assert(npoints == di_chrominance.num_cols);
   // Push these into temp storage param eventually
   cusp::array2d<real, cusp::device_memory> total_chrominance(2, nsegments);
-  cusp::array1d<int, cusp::device_memory> segment_sizes(nsegments+1);
+  cusp::array1d<int, cusp::device_memory> segment_sizes(nsegments + 1);
 
   cusp::array1d<int, cusp::device_memory> indices(npoints);
   cusp::array1d<int, cusp::device_memory> labels(npoints);
@@ -150,7 +140,6 @@ SPLIT_API void merge_insignificant(
   // Reduce by column to find the lowest distance, and hence nearest in
   // chrominance space to our segment, this is the segment we want to merge
   // with.
-  printf("DEBUG: %d\n", __LINE__);
   thrust::reduce_by_key(di_segment_adjacency_keys.begin(),
                         di_segment_adjacency_keys.end(),
                         entry_it,
@@ -158,7 +147,6 @@ SPLIT_API void merge_insignificant(
                         detail::zip_it(discard_it, d_targets.begin()),
                         thrust::equal_to<int>(),
                         thrust::minimum<thrust::tuple<real, int>>());
-  printf("DEBUG: %d\n", __LINE__);
 
   // We have converged if all segments have size greater than or equal to P
   auto old_labels = labels.begin();
@@ -168,35 +156,33 @@ SPLIT_API void merge_insignificant(
   };
   // Iterate over the target and current labels, with the current segment size,
   // using a transform functor to decide the final target to write
-  auto target_it = thrust::make_transform_iterator(
+  auto map_it = thrust::make_transform_iterator(
     thrust::make_permutation_iterator(
       detail::zip_it(d_targets.begin(),
                      thrust::make_counting_iterator(0),
                      segment_sizes.begin()),
       dio_segment_labels.begin()),
     TargetMap{P});
-  // An iterator that provides a mapping from current to target labels
-  auto map_it = detail::zip_it(dio_segment_labels.begin(), target_it);
+  // Extract the target from the map iterator
+  auto target_it = thrust::make_transform_iterator(
+    map_it, [] __host__ __device__(const thrust::tuple<int, int>& tup) {
+      return tup.get<1>();
+    });
+
   // Loop until convergence
   while (!has_converged())
   {
-  cudaDeviceSynchronize();
-  printf("DEBUG: %d\n", __LINE__);
     thrust::copy_n(dio_segment_labels.begin(), npoints, labels.begin());
-  printf("DEBUG: %d\n", __LINE__);
     // Merge segments by replacing their labels with the target labels, if the
     // segment is small (size < P)
     thrust::transform(
       map_it,
-      map_it + nsegments,
+      map_it + npoints,
       // Targets targets
       thrust::make_permutation_iterator(d_targets.begin(), target_it),
       dio_segment_labels.begin(),
       MergeSegment{});
-  cudaDeviceSynchronize();
-  printf("DEBUG: %d\n", __LINE__);
   }
-  printf("DEBUG: %d\n", __LINE__);
 }
 
 }  // namespace ccl
