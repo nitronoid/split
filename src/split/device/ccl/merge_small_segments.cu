@@ -1,4 +1,4 @@
-#include "split/device/ccl/merge_insignificant.cuh"
+#include "split/device/ccl/merge_small_segments.cuh"
 #include "split/device/detail/segment_length.cuh"
 #include "split/device/detail/zip_it.cuh"
 #include <cusp/print.h>
@@ -69,11 +69,12 @@ struct TargetMap
 
 }  // namespace
 
-SPLIT_API void merge_insignificant(
+SPLIT_API void merge_small_segments(
   cusp::array2d<real, cusp::device_memory>::const_view di_chrominance,
   cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency_keys,
   cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency,
   cusp::array1d<int, cusp::device_memory>::view dio_segment_labels,
+  thrust::device_ptr<void> do_temp,
   int P)
 {
   // Get these sizes upfront
