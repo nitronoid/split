@@ -3,7 +3,7 @@
 #include "split/device/ccl/connected_components.cuh"
 #include "split/device/ccl/compress_labels.cuh"
 #include "split/device/ccl/segment_adjacency.cuh"
-#include "split/device/ccl/merge_insignificant.cuh"
+#include "split/device/ccl/merge_small_segments.cuh"
 #include "split/device/color/conversion.cuh"
 #include "split/device/color/beta_feature.cuh"
 #include "split/device/detail/view_util.cuh"
@@ -17,24 +17,18 @@
 
 #define real split::real
 
-
 void sandbox()
 {
   printf("\n\n\n\n\n SANDBOX\n\n");
-  std::vector<int> labels = {
-    0, 0, 0, 3, 4,
-    0, 0, 1, 3, 4,
-    1, 1, 1, 3, 4,
-    1, 2, 2, 3, 3,
-    2, 2, 2, 5, 5,
-    5, 5, 5, 5, 5};
+  std::vector<int> labels = {0, 0, 0, 3, 4, 0, 0, 1, 3, 4, 1, 1, 1, 3, 4,
+                             1, 2, 2, 3, 3, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5};
   const int npixels = labels.size();
 
   cusp::array2d<int, cusp::device_memory> d_labels(6, 5);
   thrust::copy_n(labels.begin(), npixels, d_labels.values.begin());
 
   cusp::array1d<int, cusp::device_memory> d_connections(16 * npixels);
-  const int nedges = 
+  const int nedges =
     split::device::ccl::segment_adjacency_edges(d_labels, d_connections);
   auto d_edges = split::device::detail::make_const_array2d_view(
     cusp::make_array2d_view(2,
@@ -43,38 +37,24 @@ void sandbox()
                             cusp::make_array1d_view(d_connections),
                             cusp::row_major{}));
 
-  std::cout<<"Num edges: "<<nedges<<'\n';
+  std::cout << "Num edges: " << nedges << '\n';
 
   for (int i = 0; i < nedges; ++i)
   {
-    std::cout<<d_edges(0, i)<<' '<<d_edges(1, i)<<'\n';
+    std::cout << d_edges(0, i) << ' ' << d_edges(1, i) << '\n';
   }
-
 
   cusp::array1d<int, cusp::device_memory> d_adjacency_keys(nedges);
   cusp::array1d<int, cusp::device_memory> d_adjacency(nedges);
-  const int nadjacency =
-    split::device::ccl::segment_adjacency(d_labels.values,
-                                          d_edges,
-                                          d_adjacency_keys,
-                                          d_adjacency);
+  const int nadjacency = split::device::ccl::segment_adjacency(
+    d_labels.values, d_edges, d_adjacency_keys, d_adjacency);
   std::cout << "Number of segment adjacencies: " << nadjacency << '\n';
 
   for (int i = 0; i < nadjacency; ++i)
   {
-    std::cout<<d_adjacency_keys[i]<<' '<<d_adjacency[i]<<'\n';
+    std::cout << d_adjacency_keys[i] << ' ' << d_adjacency[i] << '\n';
   }
-
-
 }
-
-
-
-
-
-
-
-
 
 template <typename T>
 void strided_copy(const T* i_src,
@@ -189,11 +169,12 @@ int main(int argc, char* argv[])
                                                            h_image.width());
 
   // Allocate temporary memory
-  TempMemory d_temp(h_image.n_pixels() * nclusters * sizeof(real));
+  TempMemory d_temp(split::device::kmeans::cluster_workspace(
+    npixels, nclusters, h_image.n_channels()));
 
   // K-means cluster the image
   split::device::kmeans::cluster(
-    d_lab_image, d_centroids, d_cluster_labels.values, d_temp.get(), 100, 1e-1);
+    d_lab_image, d_centroids, d_cluster_labels.values, d_temp.get(), 100, 1e-3);
 
   // Obtain isolated segments from our initial clustering
   split::device::ccl::connected_components(
@@ -206,8 +187,6 @@ int main(int argc, char* argv[])
   cusp::array2d<real, cusp::device_memory> d_seg_centroids(h_image.n_channels(),
                                                            nsegments);
 
-
-
   // Re-calculate the centroids using the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
     d_cluster_labels.values, d_rgb_image, d_centroids, d_temp.get());
@@ -218,27 +197,7 @@ int main(int argc, char* argv[])
 
   //---------------------------------------------------------------------------
 
-
   cusp::array1d<int, cusp::device_memory> d_segment_connections(16 * npixels);
-  const int nedges = split::device::ccl::segment_adjacency_edges(
-    d_segment_labels, d_segment_connections);
-  std::cout << "Number of segment edges: " << nedges << '\n';
-
-  auto d_segment_edges = split::device::detail::make_const_array2d_view(
-    cusp::make_array2d_view(2,
-                            nedges,
-                            nedges,
-                            cusp::make_array1d_view(d_segment_connections),
-                            cusp::row_major{}));
-
-  cusp::array1d<int, cusp::device_memory> d_segment_adjacency_keys(nedges);
-  cusp::array1d<int, cusp::device_memory> d_segment_adjacency(nedges);
-  const int nadjacency =
-    split::device::ccl::segment_adjacency(d_segment_labels.values,
-                                          d_segment_edges,
-                                          d_segment_adjacency_keys,
-                                          d_segment_adjacency);
-  std::cout << "Number of segment adjacencies: " << nadjacency << '\n';
 
   auto d_chrominance = split::device::detail::make_const_array2d_view(
     cusp::make_array2d_view(2,
@@ -247,39 +206,43 @@ int main(int argc, char* argv[])
                             d_lab_image.values.subarray(npixels, npixels * 2),
                             cusp::row_major{}));
 
-  const auto d_sak = 
-    d_segment_adjacency_keys.subarray(0, nadjacency);
-  const auto d_sa = 
-    d_segment_adjacency.subarray(0, nadjacency);
+  for (int i = 0; i < 2; ++i)
+  {
+    const int nedges = split::device::ccl::segment_adjacency_edges(
+      d_segment_labels, d_segment_connections);
+    std::cout << "Number of segment edges: " << nedges << '\n';
+    auto d_segment_edges = split::device::detail::make_const_array2d_view(
+      cusp::make_array2d_view(2,
+                              nedges,
+                              nedges,
+                              cusp::make_array1d_view(d_segment_connections),
+                              cusp::row_major{}));
+    cusp::array1d<int, cusp::device_memory> d_segment_adjacency_keys(nedges);
+    cusp::array1d<int, cusp::device_memory> d_segment_adjacency(nedges);
 
-  std::cout<<"MIN: "<<*thrust::min_element(d_segment_labels.values.begin(), d_segment_labels.values.end())<<'\n';
-  std::cout << "Merging small clusters\n";
-  split::device::ccl::merge_insignificant(
-    d_chrominance,
-    d_sak,
-    d_sa,
-    d_segment_labels.values);
-
-  int nseg =
+    const int nadjacency =
+      split::device::ccl::segment_adjacency(d_segment_labels.values,
+                                            d_segment_edges,
+                                            d_segment_adjacency_keys,
+                                            d_segment_adjacency);
+    std::cout << "Number of segment adjacencies: " << nadjacency << '\n';
+    const auto d_sak = d_segment_adjacency_keys.subarray(0, nadjacency);
+    const auto d_sa = d_segment_adjacency.subarray(0, nadjacency);
+    std::cout << "Merging small clusters\n";
+    split::device::ccl::merge_small_segments(
+      d_chrominance, d_sak, d_sa, d_segment_labels.values, d_temp.get());
     split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
-  cusp::array2d<real, cusp::device_memory> d_merged_centroids(h_image.n_channels(),
-                                                           nseg);
+  }
 
   // Re-calculate the centroids using the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
-    d_segment_labels.values, d_rgb_image, d_merged_centroids, d_temp.get());
-  // Copy the segment means to their member pixels
-  split::device::kmeans::propagate_centroids(
-    d_segment_labels.values, d_merged_centroids, d_rgb_image);
-
-  make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/merged.png", h_image);
+    d_segment_labels.values, d_rgb_image, d_seg_centroids, d_temp.get());
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
     d_segment_labels.values, d_seg_centroids, d_rgb_image);
 
   make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/segments.png", h_image);
+  split::host::stbi::writef("assets/images/merged.png", h_image);
 
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
@@ -289,9 +252,7 @@ int main(int argc, char* argv[])
   split::host::stbi::writef("assets/images/clusters.png", h_image);
   //------------------------------------------------------------------
 
-
-  //sandbox();
-
+  // sandbox();
 
   return 0;
 }
