@@ -20,6 +20,7 @@ namespace kmeans
 SPLIT_API void initialize_centroids(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory>::view do_centroids);
+
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END

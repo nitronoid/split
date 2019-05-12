@@ -13,6 +13,12 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace kmeans
 {
+SPLIT_API std::size_t calculate_centroids_workspace(const int i_npoints,
+                                                    const int i_ncentroids)
+{
+  return i_npoints * 2 * sizeof(int) + i_ncentroids * sizeof(real);
+}
+
 SPLIT_API void calculate_centroids(
   cusp::array1d<int, cusp::device_memory>::const_view di_labels,
   cusp::array2d<real, cusp::device_memory>::const_view di_points,

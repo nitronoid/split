@@ -67,6 +67,12 @@ void compute_distances(
 }  // namespace
 }  // namespace
 
+SPLIT_API std::size_t label_points_workspace(const int i_npoints,
+                                             const int i_nclusters)
+{
+  return i_npoints * i_nclusters * sizeof(real);
+}
+
 SPLIT_API void
 label_points(cusp::array2d<real, cusp::device_memory>::const_view di_centroids,
              cusp::array2d<real, cusp::device_memory>::const_view di_points,

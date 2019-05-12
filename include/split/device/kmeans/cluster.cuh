@@ -37,6 +37,16 @@ cluster(cusp::array2d<real, cusp::device_memory>::const_view di_points,
         int i_max_iter,
         real i_threshold = 1.f);
 
+/***
+   @brief Calculates the amount of temporary memory required by the
+   cluster function.
+   @param i_npoints The number of data points to be supplied to cluster.
+   @param i_nclusters The number of clusters to be produced.
+   @param i_dim The dimension of the data.
+ ***/
+SPLIT_API std::size_t
+cluster_workspace(const int i_npoints, const int i_nclusters, const int i_dim);
+
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END

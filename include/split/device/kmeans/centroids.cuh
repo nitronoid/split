@@ -30,6 +30,16 @@ SPLIT_API void calculate_centroids(
   cusp::array2d<real, cusp::device_memory>::view do_centroids,
   thrust::device_ptr<void> do_temp);
 
+/***
+   @brief Calculates the amount of temporary memory required by the
+   calculate_centroids function.
+   @param i_npoints The number of data points to be supplied to
+ calculate_centroids.
+   @param i_ncentroids The number of centroids to be calculated.
+ ***/
+SPLIT_API std::size_t calculate_centroids_workspace(const int i_npoints,
+                                                    const int i_ncentroids);
+
 }  // namespace kmeans
 
 SPLIT_DEVICE_NAMESPACE_END
