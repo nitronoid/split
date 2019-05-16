@@ -36,7 +36,7 @@ __global__ void d_segment_edges(const int* __restrict__ di_labels,
   // the provided global memory. These will be taken care of by neighboring
   // blocks due to the overlap.
   if ((threadIdx.x == blockDim.x - 1) || (threadIdx.y == blockDim.y - 1) ||
-      (g_x > i_width - 2) && (g_y > i_height - 2))
+      (g_x > i_width - 2) || (g_y > i_height - 2))
     return;
 
   // Put our label in a register as we'll need it a lot
@@ -171,60 +171,50 @@ SPLIT_API int segment_adjacency_edges(
   cusp::array2d<int, cusp::device_memory>::const_view di_labels,
   cusp::array1d<int, cusp::device_memory>::view do_edges)
 {
+  const int npoints = di_labels.num_entries;
 #if 0
-  const int npoints = di_labels.num_entries;
-  // Handy iterators
-  auto source_begin = do_edges.begin();
-  auto target_begin = do_edges.begin() + npoints * 8;
-  auto target_end = target_begin + npoints * 8;
-  // Initialize the source labels for the segment edges
-  thrust::tabulate(source_begin, target_begin, detail::unary_divides<int>(8));
-  // Initialize the target labels with a sentinel value
-  thrust::fill(target_begin, target_end, -1);
-  printf("debug %d\n", __LINE__);
+  {
+    // Handy iterators
+    auto source_begin = do_edges.begin();
+    auto target_begin = do_edges.begin() + npoints * 8;
+    auto target_end = target_begin + npoints * 8;
+    // Initialize the source labels for the segment edges
+    thrust::tabulate(source_begin, target_begin, detail::unary_divides<int>(8));
+    // Initialize the target labels with a sentinel value
+    thrust::fill(target_begin, target_end, -1);
 
-  // Raw pointer to all labels
-  const int* label_ptr = di_labels.values.begin().base().get();
-  // Raw pointer to the edge target labels
-  int* connection_ptr = target_begin.base().get();
+    // Raw pointer to all labels
+    const int* label_ptr = di_labels.values.begin().base().get();
+    // Raw pointer to the edge target labels
+    int* connection_ptr = target_begin.base().get();
 
-  const dim3 block_dim(32, 32);
-  const int nblock_threads = block_dim.x * block_dim.y * block_dim.z;
-  const int nblocks = overlapping_blocks(
-    {di_labels.num_cols, di_labels.num_rows}, {block_dim.x, block_dim.y});
-  const std::size_t nshared_mem = nblock_threads * sizeof(int);
+    const dim3 block_dim(32, 32);
+    const int nblock_threads = block_dim.x * block_dim.y * block_dim.z;
+    const int nblocks = overlapping_blocks(
+      {di_labels.num_cols, di_labels.num_rows}, {block_dim.x, block_dim.y});
+    const std::size_t nshared_mem = nblock_threads * sizeof(int);
+    printf("debug %d\n", __LINE__);
+    std::cout << "Nblocks: " << nblocks << '\n';
 
-  // Launch the kernel
-  d_segment_edges<<<nblocks, block_dim, nshared_mem>>>(
-    label_ptr, di_labels.num_cols, di_labels.num_rows, connection_ptr);
-  // Wait for the kernel to complete
-  cudaDeviceSynchronize();
-  printf("debug %d\n", __LINE__);
+    // Launch the kernel
+    d_segment_edges<<<nblocks, block_dim, nshared_mem>>>(
+      label_ptr, di_labels.num_cols, di_labels.num_rows, connection_ptr);
+    // Wait for the kernel to complete
+    cudaDeviceSynchronize();
+    printf("debug %d\n", __LINE__);
 
-  // Iterate only over the segment edge pairs
-  auto edge_begin = detail::zip_it(source_begin, target_begin);
-  auto edge_end = edge_begin + npoints * 8;
-  // Remove any sentinel edges
-  auto new_end = thrust::remove_if(
-    edge_begin, edge_end, [] __device__(const thrust::tuple<int, int>& pair) {
-      return pair.get<1>() == -1;
-    });
-  printf("debug %d\n", __LINE__);
-  cusp::print(do_edges.subarray(npoints * 8, 25));
-
-  // Remove any edges stemming from the same pixel, that end in a common segment
-  // new_end = thrust::unique(edge_begin, new_end, UniqueConnections(labels));
-  // Copy the targets of each edge, to the memory immediately after the source
-  // of each edge.
-  thrust::copy(edge_begin.get_iterator_tuple().get<1>(),
-               new_end.get_iterator_tuple().get<1>(),
-               new_end.get_iterator_tuple().get<0>());
-  printf("debug %d\n", __LINE__);
-
-  return new_end - edge_begin;
+    // Iterate only over the segment edge pairs
+    auto edge_begin = detail::zip_it(source_begin, target_begin);
+    auto edge_end = edge_begin + npoints * 8;
+    // Remove any sentinel edges
+    auto new_end = thrust::remove_if(
+      edge_begin, edge_end, [] __device__(const thrust::tuple<int, int>& pair) {
+        return pair.get<1>() == -1;
+      });
+    printf("debug %d\n", __LINE__);
+    cusp::print(do_edges.subarray(npoints * 8 + 25, 25));
+  }
 #else
-
-  const int npoints = di_labels.num_entries;
   {
     // Read the edges as packed 8 tuples
     auto edge8_ptr = thrust::device_pointer_cast(
@@ -251,6 +241,8 @@ SPLIT_API int segment_adjacency_edges(
       return pair.get<1>() < 0 ||
              labels[pair.get<0>()] == labels[pair.get<1>()];
     });
+  // cusp::print(do_edges.subarray(npoints * 8 + 25, 25));
+#endif
 
   // Copy the targets of each edge to the memory immediately after the source of
   // each edge.
@@ -259,39 +251,40 @@ SPLIT_API int segment_adjacency_edges(
                new_end.get_iterator_tuple().get<0>());
 
   return new_end - edge_begin;
-#endif
 }
 
 SPLIT_API int segment_adjacency(
-  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<int, cusp::device_memory>::const_view di_edges,
+  cusp::array2d<int, cusp::device_memory>::const_view di_labels,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency_keys,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency)
 {
+  cusp::array1d<int, cusp::device_memory> d_edges(16 * di_labels.num_entries);
+  // Calculate the edges
+  const int nedges = segment_adjacency_edges(di_labels, d_edges);
   // Look-up the segment labels for each end of an edge
   auto edge_label_it = thrust::make_permutation_iterator(
-    di_labels.begin(), di_edges.values.begin());
+    di_labels.values.begin(), d_edges.begin());
   // Iterate over the edge label pairs
   auto edge_begin =
-    detail::zip_it(edge_label_it, edge_label_it + di_edges.num_cols);
-  auto edge_end = edge_begin + di_edges.num_cols;
+    detail::zip_it(edge_label_it, edge_label_it + nedges);
+  auto edge_end = edge_begin + nedges;
   // Iterate over pairs of adjacency keys and values
   auto adj_begin = detail::zip_it(do_segment_adjacency_keys.begin(),
                                   do_segment_adjacency.begin());
-  auto adj_end = adj_begin + di_edges.num_cols;
+  auto adj_end = adj_begin + nedges;
   // Copy the edge labels into our adjacency lists
   thrust::copy(edge_begin, edge_end, adj_begin);
   // Sort by value and then stable sort by key so our duplicate edges are
   // neighboring
   thrust::sort_by_key(do_segment_adjacency.begin(),
-                      do_segment_adjacency.end(),
+                      do_segment_adjacency.begin() + nedges,
                       do_segment_adjacency_keys.begin());
   thrust::stable_sort_by_key(do_segment_adjacency_keys.begin(),
-                             do_segment_adjacency_keys.end(),
+                             do_segment_adjacency_keys.begin() + nedges,
                              do_segment_adjacency.begin());
   // The result of unique edge labels, is the segment adjacency list
   auto new_end = thrust::unique(adj_begin, adj_end);
-
+  // Return the number of adjacencies
   return new_end - adj_begin;
 }
 }  // namespace ccl

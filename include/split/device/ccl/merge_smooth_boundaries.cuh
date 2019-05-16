@@ -18,8 +18,15 @@ namespace ccl
    This array is stored in device memory.
    ***/
 SPLIT_API void merge_smooth_boundaries(
-  cusp::array2d<int, cusp::device_memory>::view dio_segment_labels,
-  real D = 0.01);
+  cusp::array2d<real, cusp::device_memory>::const_view di_points,
+  const int i_nsegments,
+  cusp::array2d<int, cusp::device_memory>::view dio_labels,
+  thrust::device_ptr<void> do_temp,
+  const real i_threshold = 0.01f);
+
+SPLIT_API std::size_t merge_smooth_boundaries_workspace(const int i_npoints,
+                                                        const int i_nsegments,
+                                                        const int i_nedges);
 
 }  // namespace ccl
 

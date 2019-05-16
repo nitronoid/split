@@ -20,8 +20,7 @@ SPLIT_API int segment_adjacency_edges(
    @brief Builds adjacency lists of the segment to segment adjacency.
    ***/
 SPLIT_API int segment_adjacency(
-  cusp::array1d<int, cusp::device_memory>::const_view di_labels,
-  cusp::array2d<int, cusp::device_memory>::const_view di_edges,
+  cusp::array2d<int, cusp::device_memory>::const_view di_labels,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency_keys,
   cusp::array1d<int, cusp::device_memory>::view do_segment_adjacency);
 

@@ -15,12 +15,12 @@ namespace ccl
    ***/
 SPLIT_API void merge_small_segments(
   cusp::array2d<real, cusp::device_memory>::const_view di_chrominance,
-  cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency_keys,
-  cusp::array1d<int, cusp::device_memory>::const_view di_segment_adjacency,
-  cusp::array1d<int, cusp::device_memory>::view dio_segment_labels,
+  cusp::array2d<int, cusp::device_memory>::view dio_segment_labels,
   thrust::device_ptr<void> do_temp,
-  int P = 10);
+  const int P = 10);
 
+SPLIT_API std::size_t merge_small_segments_workspace(const int i_npoints,
+                                                     const int i_nsegments);
 }  // namespace ccl
 
 SPLIT_DEVICE_NAMESPACE_END
