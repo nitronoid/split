@@ -4,8 +4,11 @@
 #include "split/device/ccl/compress_labels.cuh"
 #include "split/device/ccl/segment_adjacency.cuh"
 #include "split/device/ccl/merge_small_segments.cuh"
+#include "split/device/ccl/merge_smooth_boundaries.cuh"
 #include "split/device/color/conversion.cuh"
 #include "split/device/color/beta_feature.cuh"
+#include "split/device/separation/luminance_continuity.cuh"
+#include "split/device/separation/similar_reflectance.cuh"
 #include "split/device/detail/view_util.cuh"
 #include "split/host/stbi/stbi_raii.hpp"
 
@@ -20,40 +23,68 @@
 void sandbox()
 {
   printf("\n\n\n\n\n SANDBOX\n\n");
-  std::vector<int> labels = {0, 0, 0, 3, 4, 0, 0, 1, 3, 4, 1, 1, 1, 3, 4,
-                             1, 2, 2, 3, 3, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5};
+  std::vector<int> labels = {0, 0, 0, 1, 1, 4, 5, 0, 0, 0, 1, 1, 4, 5, 0, 0, 0,
+                             0, 1, 4, 4, 2, 2, 1, 1, 1, 4, 4, 2, 2, 1, 1, 1, 3,
+                             3, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3};
+
   const int npixels = labels.size();
+  int nsegments = 5;
 
-  cusp::array2d<int, cusp::device_memory> d_labels(6, 5);
+  cusp::array2d<int, cusp::device_memory> d_labels(7, 7);
   thrust::copy_n(labels.begin(), npixels, d_labels.values.begin());
-
   cusp::array1d<int, cusp::device_memory> d_connections(16 * npixels);
-  const int nedges =
-    split::device::ccl::segment_adjacency_edges(d_labels, d_connections);
-  auto d_edges = split::device::detail::make_const_array2d_view(
-    cusp::make_array2d_view(2,
-                            nedges,
-                            nedges,
-                            cusp::make_array1d_view(d_connections),
-                            cusp::row_major{}));
 
-  std::cout << "Num edges: " << nedges << '\n';
+  cusp::array2d<real, cusp::device_memory> d_chroma(3, npixels);
+  thrust::tabulate(d_chroma.values.begin(),
+                   d_chroma.values.end(),
+                   [=] __device__(int) { return 0.5f; });
+  cusp::array2d<real, cusp::device_memory> d_rgb_image(3, npixels);
+  thrust::tabulate(d_rgb_image.values.begin(),
+                   d_rgb_image.values.end(),
+                   [=] __device__(int i) {
+                     int x = i % npixels;
+                     int y = i / npixels;
 
-  for (int i = 0; i < nedges; ++i)
+                     return x * (0.5f / npixels) + y * (0.5f / 3.f);
+                   });
+
+  thrust::device_ptr<void> d_temp = thrust::device_malloc(
+    split::device::ccl::merge_small_segments_workspace(npixels, 5));
+
+  for (int i = 0; i < 1; ++i)
   {
-    std::cout << d_edges(0, i) << ' ' << d_edges(1, i) << '\n';
+    std::cout << "Merging small clusters\n";
+    split::device::ccl::merge_small_segments(d_chroma, d_labels, d_temp);
+    nsegments = split::device::ccl::compress_labels(d_labels.values, d_temp);
+  }
+  std::cout << "Post small merging\n";
+  for (int i = 0; i < d_labels.num_rows; ++i)
+  {
+    for (int j = 0; j < d_labels.num_cols; ++j)
+    {
+      std::cout << d_labels(i, j) << ' ';
+    }
+    std::cout << '\n';
   }
 
-  cusp::array1d<int, cusp::device_memory> d_adjacency_keys(nedges);
-  cusp::array1d<int, cusp::device_memory> d_adjacency(nedges);
-  const int nadjacency = split::device::ccl::segment_adjacency(
-    d_labels.values, d_edges, d_adjacency_keys, d_adjacency);
-  std::cout << "Number of segment adjacencies: " << nadjacency << '\n';
-
-  for (int i = 0; i < nadjacency; ++i)
+  for (int i = 0; i < 1; ++i)
   {
-    std::cout << d_adjacency_keys[i] << ' ' << d_adjacency[i] << '\n';
+    std::cout << "Merging smooth boundaries\n";
+    split::device::ccl::merge_smooth_boundaries(
+      d_rgb_image, nsegments, d_labels, d_temp);
+    nsegments = split::device::ccl::compress_labels(d_labels.values, d_temp);
   }
+  std::cout << "Post smooth merging\n";
+  for (int i = 0; i < d_labels.num_rows; ++i)
+  {
+    for (int j = 0; j < d_labels.num_cols; ++j)
+    {
+      std::cout << d_labels(i, j) << ' ';
+    }
+    std::cout << '\n';
+  }
+
+  thrust::device_free(d_temp);
 }
 
 template <typename T>
@@ -131,6 +162,7 @@ private:
 
 int main(int argc, char* argv[])
 {
+#if 1
   assert(argc == 2);
   auto h_image = split::host::stbi::loadf(argv[1], 3);
   printf("Loaded image with dim: %dx%dx%d\n",
@@ -161,7 +193,7 @@ int main(int argc, char* argv[])
 
   cusp::array2d<real, cusp::device_memory> d_centroids(h_image.n_channels(),
                                                        nclusters);
-  split::device::kmeans::initialize_centroids(d_lab_image, d_centroids);
+  split::device::kmeans::uniform_random_initialize(d_lab_image, d_centroids);
 
   cusp::array2d<int, cusp::device_memory> d_cluster_labels(h_image.height(),
                                                            h_image.width());
@@ -180,7 +212,7 @@ int main(int argc, char* argv[])
   split::device::ccl::connected_components(
     d_cluster_labels, d_temp.get(), d_segment_labels.values, 100);
   // Compress the segment labels to produce a contiguous sequence
-  const int nsegments =
+  int nsegments =
     split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
   std::cout << "Segmented into " << nsegments << " connected components.\n";
   // Re-calculate the centroids using the segment labels
@@ -190,15 +222,7 @@ int main(int argc, char* argv[])
   // Re-calculate the centroids using the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
     d_cluster_labels.values, d_rgb_image, d_centroids, d_temp.get());
-
-  // Re-calculate the centroids using the centroids using the segment labels
-  split::device::kmeans::calculate_centroids(
-    d_segment_labels.values, d_rgb_image, d_seg_centroids, d_temp.get());
-
   //---------------------------------------------------------------------------
-
-  cusp::array1d<int, cusp::device_memory> d_segment_connections(16 * npixels);
-
   auto d_chrominance = split::device::detail::make_const_array2d_view(
     cusp::make_array2d_view(2,
                             npixels,
@@ -206,32 +230,54 @@ int main(int argc, char* argv[])
                             d_lab_image.values.subarray(npixels, npixels * 2),
                             cusp::row_major{}));
 
-  for (int i = 0; i < 2; ++i)
+  for (int i = 0; i < 10 && (nsegments > 1000 || i < 2); ++i)
   {
-    const int nedges = split::device::ccl::segment_adjacency_edges(
-      d_segment_labels, d_segment_connections);
-    std::cout << "Number of segment edges: " << nedges << '\n';
-    auto d_segment_edges = split::device::detail::make_const_array2d_view(
-      cusp::make_array2d_view(2,
-                              nedges,
-                              nedges,
-                              cusp::make_array1d_view(d_segment_connections),
-                              cusp::row_major{}));
-    cusp::array1d<int, cusp::device_memory> d_segment_adjacency_keys(nedges);
-    cusp::array1d<int, cusp::device_memory> d_segment_adjacency(nedges);
-
-    const int nadjacency =
-      split::device::ccl::segment_adjacency(d_segment_labels.values,
-                                            d_segment_edges,
-                                            d_segment_adjacency_keys,
-                                            d_segment_adjacency);
-    std::cout << "Number of segment adjacencies: " << nadjacency << '\n';
-    const auto d_sak = d_segment_adjacency_keys.subarray(0, nadjacency);
-    const auto d_sa = d_segment_adjacency.subarray(0, nadjacency);
+    TempMemory d_temp(
+      split::device::ccl::merge_small_segments_workspace(npixels, nsegments));
     std::cout << "Merging small clusters\n";
     split::device::ccl::merge_small_segments(
-      d_chrominance, d_sak, d_sa, d_segment_labels.values, d_temp.get());
-    split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
+      d_chrominance, d_segment_labels, d_temp.get(), 10 * (i + 1));
+    nsegments = split::device::ccl::compress_labels(d_segment_labels.values,
+                                                    d_temp.get());
+  }
+  printf("Number of segments post merge: %d\n", nsegments);
+
+  for (int i = 0; i < 0; ++i)
+  {
+    TempMemory d_temp(split::device::ccl::merge_smooth_boundaries_workspace(
+      npixels, nsegments, npixels * 8));
+    std::cout << "Merging smooth boundaries\n";
+    split::device::ccl::merge_smooth_boundaries(
+      d_rgb_image, nsegments, d_segment_labels, d_temp.get(), 0.005f);
+    nsegments = split::device::ccl::compress_labels(d_segment_labels.values,
+                                                    d_temp.get());
+  }
+
+  //----------------------------------------------------------------------------
+  // Build the linear system of intrinsic separation equations
+  //----------------------------------------------------------------------------
+  {
+    printf("Generating luminance continuity equations.\n");
+    cusp::array2d<real, cusp::device_memory> A;
+    cusp::array1d<real, cusp::device_memory> b;
+    // Calculate the luminance continuity equations
+    std::tie(A, b) = split::device::separation::luminance_continuity(
+      d_segment_labels, d_luminance, d_temp.get());
+  }
+  {
+    printf("Generating similar reflectance equations.\n");
+    cusp::array2d<real, cusp::device_memory> A;
+    cusp::array1d<real, cusp::device_memory> b;
+    // Calculate the luminance continuity equations
+    std::tie(A, b) =
+      split::device::separation::similar_reflectance(d_cluster_labels.values,
+                                                     d_segment_labels.values,
+                                                     d_rgb_image,
+                                                     d_luminance,
+                                                     nclusters,
+                                                     nsegments,
+                                                     d_temp.get());
+    //cusp::print(b);
   }
 
   // Re-calculate the centroids using the centroids using the segment labels
@@ -251,8 +297,10 @@ int main(int argc, char* argv[])
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("assets/images/clusters.png", h_image);
   //------------------------------------------------------------------
+#else
 
-  // sandbox();
+  sandbox();
+#endif
 
   return 0;
 }
