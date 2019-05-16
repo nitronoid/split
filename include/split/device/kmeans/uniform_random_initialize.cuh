@@ -1,5 +1,5 @@
-#if !defined(SPLIT_DEVICE_INCLUDED_KMEANS_INITIALIZE)
-#define SPLIT_DEVICE_INCLUDED_KMEANS_INITIALIZE
+#if !defined(SPLIT_DEVICE_INCLUDED_KMEANS_UNIFORM_RANDOM_INITIALIZE)
+#define SPLIT_DEVICE_INCLUDED_KMEANS_UNIFORM_RANDOM_INITIALIZE
 
 #include "split/detail/internal.h"
 #include <cusp/array2d.h>
@@ -17,7 +17,7 @@ namespace kmeans
    selected points, acting as the initial seeding for clustering. This matrix is
    stored in device memory.
    ***/
-SPLIT_API void initialize_centroids(
+SPLIT_API void uniform_random_initialize(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory>::view do_centroids);
 
@@ -25,4 +25,4 @@ SPLIT_API void initialize_centroids(
 
 SPLIT_DEVICE_NAMESPACE_END
 
-#endif  // SPLIT_DEVICE_INCLUDED_KMEANS_INITIALIZE
+#endif  // SPLIT_DEVICE_INCLUDED_KMEANS_UNIFORM_RANDOM_INITIALIZE

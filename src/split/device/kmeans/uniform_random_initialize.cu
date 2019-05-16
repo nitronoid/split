@@ -1,4 +1,4 @@
-#include "split/device/kmeans/initialize.cuh"
+#include "split/device/kmeans/uniform_random_initialize.cuh"
 #include "split/device/detail/zip_it.cuh"
 #include <thrust/random.h>
 #include <cusp/print.h>
@@ -7,7 +7,7 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace kmeans
 {
-SPLIT_API void initialize_centroids(
+SPLIT_API void uniform_random_initialize(
   cusp::array2d<real, cusp::device_memory>::const_view di_points,
   cusp::array2d<real, cusp::device_memory>::view do_centroids)
 {
