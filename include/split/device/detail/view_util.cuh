@@ -8,8 +8,7 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace detail
 {
-/// @brief A wrapper for creating thrust zip iterators, regular syntax is pretty
-/// exhausting
+/// @brief Converts a mutable array2d_view to a const view
 template <typename T,
           typename ConstArrayView2D = typename T::container::const_view>
 ConstArrayView2D make_const_array2d_view(const T& array_view)
@@ -18,6 +17,13 @@ ConstArrayView2D make_const_array2d_view(const T& array_view)
                           array_view.num_cols,
                           array_view.num_cols,
                           array_view.values);
+}
+/// @brief Converts a mutable array1d_view to a const view
+template <typename T,
+          typename ConstArrayView1D = typename T::container::const_view>
+ConstArrayView1D make_const_array1d_view(const T& array_view)
+{
+  return ConstArrayView1D(array_view);
 }
 }  // namespace detail
 

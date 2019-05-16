@@ -9,39 +9,17 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace detail
 {
-/// @brief A function for calculating the length and cumulative length of each
-/// segment in an input list. Useful for calculating valences, CSR matrix
-/// offsets etc.
-template <typename InputIterator,
-          typename IndexT,
-          typename CumulativeLengthIterator,
-          typename LengthIterator>
-void segment_length(InputIterator&& input_begin,
-                    InputIterator&& input_end,
-                    IndexT num_segments,
-                    CumulativeLengthIterator&& cumulative_length,
+/// @brief A function for calculating the length of each segment in an input
+/// list.
+template <typename InputBeginT, typename InputEndT, typename LengthIterator>
+void segment_length(InputBeginT&& input_begin,
+                    InputEndT&& input_end,
                     LengthIterator&& length)
 {
-  auto count = thrust::make_counting_iterator(0);
-  // Find the cumulative length of each segment
-  thrust::upper_bound(
-    input_begin, input_end, count, count + num_segments, cumulative_length);
-  // Compute the length of each segment
-  thrust::adjacent_difference(
-    cumulative_length, cumulative_length + num_segments, length);
-}
-
-/// @brief A wrapper for the function above, where only the length is requested,
-/// it is safe to use the same length array for the two arguments
-template <typename InputIterator,
-          typename IndexT,
-          typename LengthIterator>
-void segment_length(InputIterator&& input_begin,
-                    InputIterator&& input_end,
-                    IndexT num_segments,
-                    LengthIterator&& length)
-{
-  segment_length(input_begin, input_end, num_segments, length, length);
+  const auto discard_it = thrust::make_discard_iterator();
+  const auto one = thrust::make_constant_iterator(1);
+  // Add up the constant iterator per segment to get the length
+  thrust::reduce_by_key(input_begin, input_end, one, discard_it, length);
 }
 
 }  // namespace detail

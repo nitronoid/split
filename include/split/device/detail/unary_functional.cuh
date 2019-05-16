@@ -17,6 +17,15 @@ struct reciprocal
 };
 
 template <typename T>
+struct unary_abs
+{
+  __host__ __device__ T operator()(T i_x) const
+  {
+    return abs(i_x);
+  }
+};
+
+template <typename T>
 struct unary_modulo
 {
   unary_modulo(T i_rhs) : rhs(i_rhs)
@@ -27,6 +36,15 @@ struct unary_modulo
   __host__ __device__ T operator()(T i_lhs) const
   {
     return i_lhs % rhs;
+  }
+};
+
+template <typename T>
+struct unary_log
+{
+  __host__ __device__ T operator()(T i_x) const
+  {
+    return log(i_x);
   }
 };
 
