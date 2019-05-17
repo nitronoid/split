@@ -40,6 +40,15 @@ struct unary_modulo
 };
 
 template <typename T>
+struct unary_exp
+{
+  __host__ __device__ T operator()(T i_x) const
+  {
+    return exp(i_x);
+  }
+};
+
+template <typename T>
 struct unary_log
 {
   __host__ __device__ T operator()(T i_x) const

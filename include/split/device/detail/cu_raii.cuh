@@ -3,14 +3,15 @@
 
 #include "split/detail/internal.h"
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
 #include <cusparse_v2.h>
 #include <cusolverSp.h>
+#include <cusolverDn.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace detail
 {
-FLO_DEVICE_NAMESPACE_BEGIN
 
 namespace cu_raii
 {
@@ -27,8 +28,35 @@ namespace cu_raii
     void join() noexcept;
   };
 
+  namespace blas
+  {
+  /// @brief RAII wrapper for a cublas instance
+  struct Handle
+  {
+    cublasHandle_t handle;
+    cublasStatus_t status;
+
+    Handle();
+    ~Handle();
+
+    operator cublasHandle_t() const noexcept;
+  };
+  }
+
   namespace solver
   {
+  /// @brief RAII wrapper for a cuda dense solver instance
+  struct SolverDn
+  {
+    cusolverDnHandle_t handle;
+    cusolverStatus_t status;
+
+    SolverDn();
+    ~SolverDn();
+
+    operator cusolverDnHandle_t() const noexcept;
+  };
+
   /// @brief RAII wrapper for a cuda sparse solver instance
   struct SolverSp
   {
@@ -39,8 +67,6 @@ namespace cu_raii
     ~SolverSp();
 
     operator cusolverSpHandle_t() const noexcept;
-    bool error_check(int line = -1) const noexcept;
-    void error_assert(int line = -1) const noexcept;
   };
   }  // namespace solver
 
@@ -56,8 +82,6 @@ namespace cu_raii
     ~Handle();
 
     operator cusparseHandle_t() const noexcept;
-    bool error_check(int line = -1) const noexcept;
-    void error_assert(int line = -1) const noexcept;
   };
 
   /// @brief RAII wrapper for a cuda sparse matrix description

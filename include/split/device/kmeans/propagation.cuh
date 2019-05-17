@@ -2,7 +2,6 @@
 #define SPLIT_DEVICE_INCLUDED_KMEANS_PROPAGATION
 
 #include "split/detail/internal.h"
-#include "split/device/cuda_raii.cuh"
 #include <cusp/array1d.h>
 #include <cusp/array2d.h>
 

@@ -7,6 +7,18 @@
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 
+#define CUDA_ERR_CHECK                                                       \
+  cudaDeviceSynchronize();                                                   \
+  error = cudaGetLastError();                                                \
+  printf("Checking for error on line %d\n", __LINE__);                       \
+  if (error != cudaSuccess)                                                  \
+  {                                                                          \
+    /* print the CUDA error message and exit*/                               \
+    printf(                                                                  \
+      "CUDA error: %s , on line %d\n", cudaGetErrorString(error), __LINE__); \
+    exit(-1);                                                                \
+  }
+
 namespace ccl
 {
 namespace
@@ -90,14 +102,14 @@ cusp::array1d<int, cusp::device_memory> inter_cluster_links(
   const int i_nsegments,
   thrust::device_ptr<void> do_temp)
 {
-  cusp::array1d<int, cusp::device_memory> d_cluster_sizes(i_nclusters);
-  cusp::array1d<int, cusp::device_memory> d_ordinal_sequence(i_nsegments);
+  cudaError_t error;
+  cusp::array1d<int, cusp::device_memory> d_cluster_sizes(i_nclusters + 1);
+  CUDA_ERR_CHECK
   // Convert to iterators up front
   auto cluster_begin = dio_cluster_labels.begin();
   auto cluster_end = dio_cluster_labels.end();
   auto segment_begin = dio_segment_labels.begin();
   auto segment_end = dio_segment_labels.end();
-  auto ordinal_begin = d_ordinal_sequence.begin();
   // These occupy the same memory
   auto cumulative_length_begin = d_cluster_sizes.begin();
   auto length_begin = d_cluster_sizes.begin();
@@ -108,16 +120,18 @@ cusp::array1d<int, cusp::device_memory> inter_cluster_links(
   // Compress the connections from clusters to segments to get a mapping
   const int nmapping =
     cluster_segment_map(dio_cluster_labels, dio_segment_labels);
+  CUDA_ERR_CHECK
   // Calculate the number of segment combinations in each cluster and get their
   // sum.
   const int ncombinations = n_inter_cluster_combinations(
     detail::make_const_array1d_view(dio_cluster_labels.subarray(0, nmapping)),
     d_cluster_sizes);
-  printf("NCOMB: %d\n", ncombinations);
+  CUDA_ERR_CHECK
   // Store the new end of the cluster range
   cluster_end = cluster_begin + nmapping;
 
   cusp::array1d<int, cusp::device_memory> do_links(ncombinations * 2);
+  CUDA_ERR_CHECK
 
   // Iterate over the cluster and segment labels simultaneously, as "ties"
   auto tie_begin = detail::zip_it(cluster_begin, segment_begin);
@@ -130,25 +144,40 @@ cusp::array1d<int, cusp::device_memory> inter_cluster_links(
                                   })
                   .get_iterator_tuple()
                   .get<0>();
+  CUDA_ERR_CHECK
   // Recompute the number of segments per cluster post removal
   detail::segment_length(cluster_begin, cluster_end, length_begin);
-  length_end = length_begin + (cluster_end - cluster_begin);
+  CUDA_ERR_CHECK
+  length_end = length_begin + i_nclusters;
   // Prefix-scan the lengths to get cumulative lengths
   thrust::exclusive_scan(length_begin, length_end, cumulative_length_begin);
+  CUDA_ERR_CHECK
 
+  cusp::array1d<int, cusp::device_memory> d_ordinal_sequence(ncombinations);
+  auto ordinal_begin = d_ordinal_sequence.begin();
   // Obtain the end iterator using the number of combinations
   auto ordinal_end = ordinal_begin + ncombinations;
-  // Fill the ordinals with a simple ascending sequence
-  thrust::sequence(ordinal_begin, ordinal_end);
-  cusp::print(d_ordinal_sequence.subarray(0, 25));
+  // Scatter ones to the positions dictated by cumulative segment lengths
+  const auto one = thrust::make_constant_iterator(0);
+  thrust::gather(
+      cumulative_length_begin, cumulative_length_begin + i_nclusters, one,
+      ordinal_begin);
+  // Inclusive scan to get which cluster each element of the sequence is in
+  thrust::inclusive_scan(ordinal_begin, ordinal_end, ordinal_begin);
+  // Subtract the previous cumulative length from the sequence to get a sequence
+  // which resets at the head of a cluster
+  CUDA_ERR_CHECK
+  // Subtract the cumulative length from the sequence, using the scanned keys
+  // TODO: combine this with a zip_iterator
+  const auto o_length = 
+    thrust::make_permutation_iterator(cumulative_length_begin, ordinal_begin);
+  thrust::transform(
+    ordinal_begin, ordinal_end, o_length, ordinal_begin, thrust::minus<int>());
+  CUDA_ERR_CHECK
+
   // Access the cumulative length of the previous cluster (starts with 0)
   const auto p_length =
     thrust::make_permutation_iterator(cumulative_length_begin, cluster_begin);
-  // Subtract the previous cumulative length from the sequence to get a sequence
-  // which resets at the head of a cluster
-  thrust::transform(
-    ordinal_begin, ordinal_end, p_length, ordinal_begin, thrust::minus<int>());
-
   // Iterate over the ordinal sequence, current and previous cumulative cluster
   // lengths
   const auto ordinal_size =
@@ -161,10 +190,12 @@ cusp::array1d<int, cusp::device_memory> inter_cluster_links(
     detail::zip_it(do_links.begin(), do_links.begin() + ncombinations);
   // Transform the ordinal sequence and sizes into indices into the mappings
   thrust::transform(
-    ordinal_size, ordinal_size + ncombinations, link_begin, Combination());
+    ordinal_size, ordinal_size + nmapping, link_begin, Combination());
+  CUDA_ERR_CHECK
   // Finally, gather the correct mappings using the indices
   thrust::gather(
     do_links.begin(), do_links.end(), segment_begin, do_links.begin());
+  CUDA_ERR_CHECK
   // Return the links
   return do_links;
 }

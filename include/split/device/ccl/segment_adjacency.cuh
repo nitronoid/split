@@ -2,7 +2,6 @@
 #define SPLIT_DEVICE_INCLUDED_CCL_SEGMENT_ADJACENCY
 
 #include "split/detail/internal.h"
-#include "split/device/cuda_raii.cuh"
 #include <cusp/array2d.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
