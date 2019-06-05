@@ -8,6 +8,63 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 namespace detail
 {
 template <typename T>
+struct constant
+{
+  constant(T i_val) : value(i_val)
+  {
+  }
+  T value;
+
+  template <typename... Args>
+  __host__ __device__ T operator()(Args&&...) const
+  {
+    return value;
+  }
+};
+
+template <typename T>
+struct unary_max
+{
+  unary_max(T i_rhs) : rhs(i_rhs)
+  {
+  }
+  T rhs;
+
+  __host__ __device__ T operator()(T i_lhs) const
+  {
+    return max(i_lhs, rhs);
+  }
+};
+
+template <typename T>
+struct unary_min
+{
+  unary_min(T i_rhs) : rhs(i_rhs)
+  {
+  }
+  T rhs;
+
+  __host__ __device__ T operator()(T i_lhs) const
+  {
+    return min(i_lhs, rhs);
+  }
+};
+
+template <typename T>
+struct unary_equal
+{
+  unary_equal(T i_rhs) : rhs(i_rhs)
+  {
+  }
+  T rhs;
+
+  __host__ __device__ T operator()(T i_lhs) const
+  {
+    return i_lhs == rhs;
+  }
+};
+
+template <typename T>
 struct reciprocal
 {
   __host__ __device__ T operator()(T i_rhs) const
