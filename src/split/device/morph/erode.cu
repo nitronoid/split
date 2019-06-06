@@ -73,7 +73,6 @@ SPLIT_API void erode_horizontal_sweep(
   auto row_begin = detail::zip_it(row_indices, dio_labels.values.begin());
   auto row_end = row_begin + npoints;
   make_gather_indices(row_begin, row_end, d_segments.begin());
-  cusp::print(d_segments);
 
   // Create an array to store the size of each rowwise segment, now we know 
   // how many exist
@@ -89,8 +88,6 @@ SPLIT_API void erode_horizontal_sweep(
   thrust::exclusive_scan(
     segment_sizes_begin, segment_sizes_end, cum_segment_sizes_begin);
 
-  cusp::print(d_segment_sizes);
-  cusp::print(d_cum_segment_sizes);
   // Compute the new sizes of each segment post erosion, clamp above zero
   thrust::transform(
     segment_sizes_begin,

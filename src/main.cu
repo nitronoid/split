@@ -29,33 +29,25 @@ void BAD_call_destructor(T& io_obj)
   io_obj.~T();
 }
 
-static const char *_cudaGetErrorEnum(cublasStatus_t error)
+static const char* _cudaGetErrorEnum(cublasStatus_t error)
 {
   switch (error)
   {
-    case CUBLAS_STATUS_SUCCESS:
-      return "CUBLAS_STATUS_SUCCESS";
+  case CUBLAS_STATUS_SUCCESS: return "CUBLAS_STATUS_SUCCESS";
 
-    case CUBLAS_STATUS_NOT_INITIALIZED:
-      return "CUBLAS_STATUS_NOT_INITIALIZED";
+  case CUBLAS_STATUS_NOT_INITIALIZED: return "CUBLAS_STATUS_NOT_INITIALIZED";
 
-    case CUBLAS_STATUS_ALLOC_FAILED:
-      return "CUBLAS_STATUS_ALLOC_FAILED";
+  case CUBLAS_STATUS_ALLOC_FAILED: return "CUBLAS_STATUS_ALLOC_FAILED";
 
-    case CUBLAS_STATUS_INVALID_VALUE:
-      return "CUBLAS_STATUS_INVALID_VALUE";
+  case CUBLAS_STATUS_INVALID_VALUE: return "CUBLAS_STATUS_INVALID_VALUE";
 
-    case CUBLAS_STATUS_ARCH_MISMATCH:
-      return "CUBLAS_STATUS_ARCH_MISMATCH";
+  case CUBLAS_STATUS_ARCH_MISMATCH: return "CUBLAS_STATUS_ARCH_MISMATCH";
 
-    case CUBLAS_STATUS_MAPPING_ERROR:
-      return "CUBLAS_STATUS_MAPPING_ERROR";
+  case CUBLAS_STATUS_MAPPING_ERROR: return "CUBLAS_STATUS_MAPPING_ERROR";
 
-    case CUBLAS_STATUS_EXECUTION_FAILED:
-      return "CUBLAS_STATUS_EXECUTION_FAILED";
+  case CUBLAS_STATUS_EXECUTION_FAILED: return "CUBLAS_STATUS_EXECUTION_FAILED";
 
-    case CUBLAS_STATUS_INTERNAL_ERROR:
-      return "CUBLAS_STATUS_INTERNAL_ERROR";
+  case CUBLAS_STATUS_INTERNAL_ERROR: return "CUBLAS_STATUS_INTERNAL_ERROR";
   }
 
   return "<unknown>";
@@ -68,15 +60,9 @@ void sandbox()
   const int B = 1;
   const int C = 2;
   const int D = 3;
-  std::vector<int> labels = {
-    A,A,A,A,A,A,A,
-    A,A,A,A,B,B,B,
-    A,A,A,A,B,B,B,
-    A,A,B,B,B,B,B,
-    C,C,B,B,B,B,B,
-    C,C,C,C,C,D,D,
-    C,C,C,C,C,D,D
-  };
+  std::vector<int> labels = {A, A, A, A, A, A, A, A, A, A, A, B, B, B, A, A, A,
+                             A, B, B, B, A, A, B, B, B, B, B, C, C, B, B, B, B,
+                             B, C, C, C, C, C, D, D, C, C, C, C, C, D, D};
   const int npixels = 42;
 
   cusp::array2d<int, cusp::device_memory> d_labels(7, 7);
@@ -85,7 +71,6 @@ void sandbox()
   split::device::morph::erode(d_labels, 2);
 
   cusp::print(d_labels);
-
 }
 
 template <typename T>
@@ -163,7 +148,7 @@ private:
 
 int main(int argc, char* argv[])
 {
-#if 0
+#if 1
   assert(argc == 2);
   auto h_image = split::host::stbi::loadf(argv[1], 3);
   printf("Loaded image with dim: %dx%dx%d\n",
@@ -261,6 +246,20 @@ int main(int argc, char* argv[])
 
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("assets/images/components.png", h_image);
+
+
+  split::device::morph::erode(d_segment_labels, 5);
+  nsegments = split::device::ccl::compress_labels(d_segment_labels.values,
+                                                  d_temp.get());
+  // Re-calculate the centroids using the segment labels
+  split::device::kmeans::calculate_centroids(
+    d_segment_labels.values, d_rgb_image, d_seg_centroids, d_temp.get());
+  // Copy the segment means to their member pixels
+  split::device::kmeans::propagate_centroids(
+    d_segment_labels.values, d_seg_centroids, d_rgb_image);
+
+  make_host_image(d_rgb_image, h_image.get());
+  split::host::stbi::writef("assets/images/eroded.png", h_image);
 
   //------------------------------------------------------------------
 #else
