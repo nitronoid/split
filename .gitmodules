@@ -7,3 +7,6 @@
 [submodule "thirdparty/stb"]
 	path = thirdparty/stb
 	url = git@github.com:nothings/stb.git
+[submodule "thirdparty/cub"]
+	path = thirdparty/cub
+	url = git@github.com:NVlabs/cub.git

@@ -93,6 +93,16 @@ __host__ __device__ Color lab_to_rgb::operator()(const Color& lab) const
   return xyz_to_rgb{}(lab_to_xyz{}(lab));
 }
 
+__host__ __device__ Color rgb_to_ic::operator()(const Color& rgb) const
+{
+  constexpr real third = 1.f / 3.f;
+  const real intensity = (rgb.get<0>() + rgb.get<1>() + rgb.get<2>()) * third;
+  const real ri = 1.f / intensity;
+  const real cr = rgb.get<0>() * ri;
+  const real cg = rgb.get<1>() * ri;
+  return thrust::make_tuple(intensity, cr, cg);
+}
+
 }  // namespace color
 
 SPLIT_DEVICE_NAMESPACE_END

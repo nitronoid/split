@@ -48,6 +48,12 @@ struct lab_to_rgb
   __host__ __device__ Color operator()(const Color& lab) const;
 };
 
+///@brief Function object to convert RGB to intensity chroma
+struct rgb_to_ic
+{
+  __host__ __device__ Color operator()(const Color& rgb) const;
+};
+
 /***
    @brief Transforms a set of values from one color space to another via a
    converter

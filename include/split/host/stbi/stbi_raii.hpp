@@ -80,6 +80,9 @@ ScopedImage loadf(gsl::czstring i_path, int i_desired_channels = 0);
    @param i_image The image to write to disk.
  ***/
 void writef(gsl::czstring i_path, const ScopedImage& i_image);
+
+std::vector<uint8_t> quantize(const ScopedImage& i_image);
+void gamma_correct(const ScopedImage& i_image, real* o_image, const real gamma);
 }  // namespace stbi
 
 SPLIT_HOST_NAMESPACE_END
