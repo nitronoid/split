@@ -164,15 +164,13 @@ int main(int argc, char* argv[])
   make_device_image(h_image.get(), d_rgb_image);
   const int npixels = h_image.n_pixels();
 
-  // Convert the input linear RGB image into L*a*b color space
-  split::device::color::convert_color_space(
-    d_rgb_image, d_lab_image, split::device::color::xyz_to_lab());
 
   //-----------------------------------------------------------------
   cusp::array2d<real, cusp::device_memory> d_intensity_chroma(
     3, h_image.n_pixels());
   split::device::color::convert_color_space(
-    d_rgb_image, d_intensity_chroma, split::device::color::rgb_to_ic());
+    d_rgb_image, d_intensity_chroma, split::device::color::rgb_to_ic<>());
+  printf("Lab conversion done\n");
   // Alias the intensity and the chroma values
   auto d_intensity = split::device::detail::make_const_array2d_view(
     cusp::make_array2d_view(h_image.height(),
@@ -204,8 +202,13 @@ int main(int argc, char* argv[])
                     d_shading_intensity.begin(),
                     thrust::divides<real>());
   cusp::blas::scal(d_shading_intensity, 0.5f);
+  printf("Intrinsic done\n");
 
   //-----------------------------------------------------------------
+  // Convert the input linear RGB image into L*a*b color space
+  split::device::color::convert_color_space(
+    d_rgb_image, d_lab_image, split::device::color::rgb_to_lab<>());
+  printf("Lab conversion done\n");
 
   // Make a copy of the image luminance before writing the beta feature
   cusp::array1d<real, cusp::device_memory> d_luminance(h_image.n_pixels());
@@ -271,13 +274,13 @@ int main(int argc, char* argv[])
 
   // Sanity check
   make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/sanity.png", h_image);
+  split::host::stbi::writef("../assets/images/sanity.png", h_image);
 
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
     d_cluster_labels.values, d_centroids, d_rgb_image);
   make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/clusters.png", h_image);
+  split::host::stbi::writef("../assets/images/clusters.png", h_image);
 
   // Re-calculate the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
@@ -287,7 +290,7 @@ int main(int argc, char* argv[])
     d_segment_labels.values, d_seg_centroids, d_rgb_image);
 
   make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/components.png", h_image);
+  split::host::stbi::writef("../assets/images/components.png", h_image);
 
   split::device::morph::erode(d_segment_labels, 5);
   nsegments =
@@ -300,7 +303,7 @@ int main(int argc, char* argv[])
     d_segment_labels.values, d_seg_centroids, d_rgb_image);
 
   make_host_image(d_rgb_image, h_image.get());
-  split::host::stbi::writef("assets/images/eroded.png", h_image);
+  split::host::stbi::writef("../assets/images/eroded.png", h_image);
 
   thrust::copy_n(d_shading_intensity.begin(),
                  h_image.n_pixels(),
