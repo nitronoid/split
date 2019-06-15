@@ -56,24 +56,18 @@ d_estimate_albedo_intensity(const real* __restrict__ di_intensity,
   extern __shared__ int s_mem[];
   int* s_contributions = s_mem;
   real* s_estimates = (real*)(s_contributions + i_nslots * i_nslots);
-
   // Global x and y, the blocks overlap and only offset threads by one
-  const int32_t g_x = threadIdx.x + blockIdx.x;
-  const int32_t g_y = threadIdx.y + blockIdx.y;
   // Calculate the pixel in the 2D grid we need to access
-  const int32_t g_tid = g_x + g_y * i_width;
+  const int32_t g_tid =
+    (threadIdx.x + blockIdx.x) + (threadIdx.y + blockIdx.y) * i_width;
 
   // Init the estimates
-  if (threadIdx.x == 0 && threadIdx.y == 0)
+  for (int i = threadIdx.x; i < i_nslots * i_nslots / 4; i += blockDim.x)
   {
-    for (int i = 0; i < i_nslots * i_nslots; ++i)
-    {
-      s_estimates[i] = 0.f;
-      s_contributions[i] = 0;
-    }
+    reinterpret_cast<float4*>(s_estimates)[i] = make_float4(0.f, 0.f, 0.f, 0.f);
+    reinterpret_cast<int4*>(s_contributions)[i] = make_int4(0, 0, 0, 0);
   }
   __syncthreads();
-
   // Hash our chroma values from global memory
   const int16_t chroma_hash = hash_chroma(di_chroma_a[g_tid],
                                           di_chroma_b[g_tid],
@@ -87,11 +81,10 @@ d_estimate_albedo_intensity(const real* __restrict__ di_intensity,
   // Divide the intensity by albedo intensity to get the shading intensity
   real shading_intensity = intensity / di_albedo_intensity[g_tid];
   // Reduce the shading intensities, to find the average across the block
-  real sum = CubReduce(s_reduce_mem).Sum(shading_intensity);
+  const real sum = CubReduce(s_reduce_mem).Sum(shading_intensity);
   if (threadIdx.x == 0 && threadIdx.y == 0)
     s_shading_intensity_avg = sum / (BLOCK_DIM * BLOCK_DIM);
   __syncthreads();
-
   // The resulting value is the average estimate times the average shading
   // intensity
   const real result = s_estimates[chroma_hash] /
@@ -123,7 +116,7 @@ SPLIT_API void estimate_albedo_intensity(
   cudaMemcpyToSymbol(c_max_chroma, max_c, sizeof(real) * 2);
 
   const int n_chroma = i_nslots * i_nslots;
-  constexpr int scale = 16;
+  constexpr int scale = 8;
   const dim3 block_dim(scale, scale, 1);
   const dim3 nblocks{width - scale + 1, height - scale + 1, 1};
   const std::size_t nshared_mem =
