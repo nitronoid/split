@@ -13,41 +13,34 @@ T clamp(T v, T lo, T hi)
 {
   return std::max(std::min(v, hi), lo);
 }
-/***
-   @brief A deleter that frees memory allocated through the stb_image interface.
-   ***/
-template <typename T>
-struct image_deleter
-{
-  void operator()(T* const ptr) const
-  {
-    if (ptr)
-      stbi_image_free(ptr);
-  }
-};
 }  // namespace
 
 namespace stbi
 {
 struct ScopedImage::ScopedImageImpl
 {
-  ScopedImageImpl(real* i_image_ptr,
-                  int i_width,
-                  int i_height,
-                  int i_nchannels)
-    : m_image_ptr(i_image_ptr)
-    , m_width(i_width)
-    , m_height(i_height)
-    , m_nchannels(i_nchannels)
+  ScopedImageImpl(real* i_image_ptr, int i_width, int i_height, int i_nchannels)
+    : width(i_width)
+    , height(i_height)
+    , nchannels(i_nchannels)
   {
+    const int ndata = i_width * i_height * i_nchannels;
+    image.reserve(ndata);
+    std::move(i_image_ptr, i_image_ptr + ndata, std::back_inserter(image));
+    stbi_image_free(i_image_ptr);
   }
-  nonstd::value_ptr<real,
-                    nonstd::vptr::detail::default_clone<real>,
-                    image_deleter<real>>
-    m_image_ptr = nullptr;
-  int m_width;
-  int m_height;
-  int m_nchannels;
+
+  ScopedImageImpl() = default;
+  ScopedImageImpl(const ScopedImageImpl&) = default;
+  ScopedImageImpl& operator=(const ScopedImageImpl&) = default;
+  ScopedImageImpl(ScopedImageImpl&&) = default;
+  ScopedImageImpl& operator=(ScopedImageImpl&&) = default;
+  ~ScopedImageImpl() = default;
+
+  std::vector<real> image;
+  int width;
+  int height;
+  int nchannels;
 };
 
 ScopedImage::ScopedImage(gsl::not_null<real*> i_image_ptr,
@@ -59,43 +52,55 @@ ScopedImage::ScopedImage(gsl::not_null<real*> i_image_ptr,
 {
 }
 
+ScopedImage::ScopedImage() = default;
 ScopedImage::ScopedImage(const ScopedImage&) = default;
 ScopedImage& ScopedImage::operator=(const ScopedImage&) = default;
 ScopedImage::ScopedImage(ScopedImage&&) = default;
 ScopedImage& ScopedImage::operator=(ScopedImage&&) = default;
 ScopedImage::~ScopedImage() = default;
 
+real* ScopedImage::release() noexcept
+{
+  // Move the image data to a raw buffer
+  auto raw_image = new real[m_impl->image.size()];
+  std::move(m_impl->image.begin(), m_impl->image.end(), raw_image);
+  // Copy an empty implementation to reset the internals
+  m_impl = {};
+  // Return the raw buffer
+  return raw_image;
+}
+
 real* ScopedImage::get() noexcept
 {
-  return m_impl->m_image_ptr.get();
+  return m_impl->image.data();
 }
 
 const real* ScopedImage::get() const noexcept
 {
-  return m_impl->m_image_ptr.get();
+  return m_impl->image.data();
 }
 int ScopedImage::width() const noexcept
 {
-  return m_impl->m_width;
+  return m_impl->width;
 }
 
 int ScopedImage::height() const noexcept
 {
-  return m_impl->m_height;
+  return m_impl->height;
 }
 
 int ScopedImage::n_channels() const noexcept
 {
-  return m_impl->m_nchannels;
+  return m_impl->nchannels;
 }
 
 int ScopedImage::n_pixels() const noexcept
 {
-  return m_impl->m_height * m_impl->m_width;
+  return m_impl->height * m_impl->width;
 }
 int ScopedImage::n_pixel_data() const noexcept
 {
-  return m_impl->m_height * m_impl->m_width * m_impl->m_nchannels;
+  return m_impl->height * m_impl->width * m_impl->nchannels;
 }
 
 ScopedImage loadf(gsl::czstring i_path, int i_desired_channels)

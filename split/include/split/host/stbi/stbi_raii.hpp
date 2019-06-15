@@ -17,6 +17,7 @@ namespace stbi
 class ScopedImage
 {
 public:
+  ScopedImage();
   /***
      @brief Takes ownership of the supplied array of data.
      @param i_image_ptr A pointer to an array of image pixel data.
@@ -41,6 +42,8 @@ public:
   ///@brief Destructor frees the image data using stbi_image_free.
   ~ScopedImage();
 
+  ///@brief Releases ownership of the image data
+  real* release() noexcept;
   ///@brief Obtains a mutable pointer to the image pixel data.
   real* get() noexcept;
   ///@brief Obtains an immutable pointer to the image pixel data.
@@ -82,7 +85,10 @@ ScopedImage loadf(gsl::czstring i_path, int i_desired_channels = 0);
 void writef(gsl::czstring i_path, const ScopedImage& i_image);
 
 std::vector<uint8_t> quantize(const ScopedImage& i_image);
-void gamma_correct(const ScopedImage& i_image, real* o_image, const real gamma);
+
+void gamma_correct(const ScopedImage& i_image,
+                   real* o_image,
+                   const real gamma = 1.f / 2.2f);
 }  // namespace stbi
 
 SPLIT_HOST_NAMESPACE_END
