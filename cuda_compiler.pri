@@ -9,7 +9,8 @@ INCLUDEPATH += \
 CUDA_INC += $$join(INCLUDEPATH, ' -I', '-I', ' ')
 
 NVCCFLAGS += -ccbin ${HOST_COMPILER} -pg -g -lineinfo --std=c++11 -O3
-NVCCFLAGS += -arch=sm_${CUDA_ARCH}
+NVCCFLAGS += -gencode arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}
+NVCCFLAGS += -gencode arch=compute_${CUDA_ARCH},code=compute_${CUDA_ARCH}
 NVCCFLAGS += -Xcompiler -fno-strict-aliasing -Xcompiler -fPIC 
 NVCCFLAGS += -Xptxas -O3 --use_fast_math --restrict --expt-relaxed-constexpr --expt-extended-lambda
 NVCCFLAGS += $$join(DEFINES, ' -D', '-D', ' ')
@@ -39,7 +40,7 @@ QMAKE_EXTRA_COMPILERS += cuda
 # Link cuda object files into one object file with symbols that GCC can recognise
 cudalink.input = CUDA_OBJ
 cudalink.output = $${OBJECTS_DIR}/cuda_link.o
-cudalink.commands = $${CUDA_COMPILE} -dlink
+cudalink.commands = $${CUDA_COMPILE} -dlink 
 cudalink.CONFIG = combine
 cudalink.dependency_type = TYPE_C
 cudalink.depend_command = $${CUDA_COMPILE_BASE} -M

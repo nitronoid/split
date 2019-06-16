@@ -14,5 +14,6 @@ HEADERS += $$files(include/*(.h | .hpp | .inl | cuh), true)
 SOURCES += $$files(src/*.cpp, true)
 CUDA_SOURCES += $$files(src/*.cu, true) 
 
+NVCCFLAGS += --shared --cudart=static
 include($${PWD}/../cuda_compiler.pri)
 
