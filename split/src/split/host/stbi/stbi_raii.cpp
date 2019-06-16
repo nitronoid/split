@@ -19,10 +19,15 @@ namespace stbi
 {
 struct ScopedImage::ScopedImageImpl
 {
+  ScopedImageImpl(int i_width, int i_height, int i_nchannels)
+    : width(i_width), height(i_height), nchannels(i_nchannels)
+  {
+    const int ndata = i_width * i_height * i_nchannels;
+    image.resize(ndata);
+  }
+
   ScopedImageImpl(real* i_image_ptr, int i_width, int i_height, int i_nchannels)
-    : width(i_width)
-    , height(i_height)
-    , nchannels(i_nchannels)
+    : width(i_width), height(i_height), nchannels(i_nchannels)
   {
     const int ndata = i_width * i_height * i_nchannels;
     image.reserve(ndata);
@@ -43,6 +48,10 @@ struct ScopedImage::ScopedImageImpl
   int nchannels;
 };
 
+ScopedImage::ScopedImage(int i_width, int i_height, int i_nchannels)
+  : m_impl(nonstd::make_value<ScopedImageImpl>(i_width, i_height, i_nchannels))
+{
+}
 ScopedImage::ScopedImage(gsl::not_null<real*> i_image_ptr,
                          int i_width,
                          int i_height,
@@ -124,11 +133,22 @@ std::vector<uint8_t> quantize(const ScopedImage& i_image)
   return quantized;
 }
 
-void gamma_correct(const ScopedImage& i_image, real* o_image, const real gamma)
+void gamma_correct(gsl::span<const uint8_t> i_image,
+                   gsl::not_null<uint8_t*> o_image,
+                   const real gamma)
+{
+  std::transform(i_image.begin(), i_image.end(), o_image.get(), [=](uint8_t v) {
+    return 255.f * pow(v / 255.f, gamma);
+  });
+}
+
+void gamma_correct(const ScopedImage& i_image,
+                   gsl::not_null<real*> o_image,
+                   const real gamma)
 {
   std::transform(i_image.get(),
                  i_image.get() + i_image.n_pixel_data(),
-                 o_image,
+                 o_image.get(),
                  [=](real v) { return pow(v, gamma); });
 }
 

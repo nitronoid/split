@@ -19,6 +19,13 @@ class ScopedImage
 public:
   ScopedImage();
   /***
+     @brief Creates an uninitialized image of the given dimensions
+     @param i_width The width in pixels of the image.
+     @param i_height The height in pixels of the image.
+     @param i_nchannels The number of color channels the image contains.
+   ***/
+  ScopedImage(int i_width, int i_height, int i_nchannels);
+  /***
      @brief Takes ownership of the supplied array of data.
      @param i_image_ptr A pointer to an array of image pixel data.
      @param i_width The width in pixels of the image.
@@ -86,8 +93,12 @@ void writef(gsl::czstring i_path, const ScopedImage& i_image);
 
 std::vector<uint8_t> quantize(const ScopedImage& i_image);
 
+void gamma_correct(gsl::span<const uint8_t> i_image,
+                   gsl::not_null<uint8_t*> o_image,
+                   const real gamma = 1.f / 2.2f);
+
 void gamma_correct(const ScopedImage& i_image,
-                   real* o_image,
+                   gsl::not_null<real*> o_image,
                    const real gamma = 1.f / 2.2f);
 }  // namespace stbi
 
