@@ -62,10 +62,10 @@ d_estimate_albedo_intensity(const real* __restrict__ di_intensity,
     (threadIdx.x + blockIdx.x) + (threadIdx.y + blockIdx.y) * i_width;
 
   // Init the estimates
-  for (int i = threadIdx.x; i < i_nslots * i_nslots / 4; i += blockDim.x)
+  for (int i = threadIdx.x; i < i_nslots * i_nslots; i += blockDim.x)
   {
-    reinterpret_cast<float4*>(s_estimates)[i] = make_float4(0.f, 0.f, 0.f, 0.f);
-    reinterpret_cast<int4*>(s_contributions)[i] = make_int4(0, 0, 0, 0);
+    s_estimates[i] = 0.f;
+    s_contributions[i] = 0;
   }
   __syncthreads();
   // Hash our chroma values from global memory
