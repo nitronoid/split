@@ -19,7 +19,7 @@ NVCCFLAGS += $$join(DEFINES, ' -D', '-D', ' ')
 
 # Suppress warnings about __host__ and __device__ macros being used on defaulted ctors/dtors
 NVCCFLAGS += -Xcudafe --display_error_number  
-NVCC_IGNORED_WARNINGS = 2906 186
+NVCC_IGNORED_WARNINGS = 2906 186 2829
 NVCCFLAGS += $$join(NVCC_IGNORED_WARNINGS, ' -Xcudafe --diag_suppress=', '-Xcudafe --diag_suppress=', ' ')
 
 NVCCBIN = ${CUDA_PATH}/bin/nvcc
