@@ -3,10 +3,10 @@
 #include "split/device/detail/matrix_functional.cuh"
 #include "split/device/detail/zip_it.cuh"
 #include "split/device/detail/cycle_iterator.cuh"
+#include "split/device/detail/apply_sor.cuh"
+#include "split/device/detail/normalize.cuh"
 #include <cusp/gallery/poisson.h>
 #include <cusp/convert.h>
-#include <cusp/relaxation/sor.h>
-#include <cusp/monitor.h>
 #include <cusp/print.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
@@ -17,51 +17,6 @@ namespace sfs
 using CooMatrix = cusp::coo_matrix<int, real, cusp::device_memory>;
 using CsrMatrix = cusp::csr_matrix<int, real, cusp::device_memory>;
 using Vec2 = thrust::tuple<real, real>;
-
-namespace
-{
-void apply_sor(
-  cusp::csr_matrix<int, real, cusp::device_memory>::const_view di_A,
-  cusp::array1d<real, cusp::device_memory>::const_view di_b,
-  cusp::array1d<real, cusp::device_memory>::view do_x,
-  const real i_w,
-  const real i_tol,
-  const int i_max_iter,
-  const bool verbose)
-{
-  // Linear SOR operator
-  cusp::relaxation::sor<real, cusp::device_memory> M(di_A, i_w);
-  // Array to store the residual
-  cusp::array1d<real, cusp::device_memory> d_r(di_b.size());
-  // Compute the initial residual
-  const auto compute_residual = [&] __host__ {
-    cusp::multiply(di_A, do_x, d_r);
-    cusp::blas::axpy(di_b, d_r, -1.f);
-  };
-  compute_residual();
-  // Monitor the convergence
-  cusp::monitor<real> monitor(di_b, i_max_iter, i_tol, 0, verbose);
-  // Iterate until convergence criteria is met
-  for (; !monitor.finished(d_r); ++monitor)
-  {
-    // Apply the SOR linear operator to iterate on our solution
-    M(di_A, di_b, do_x);
-    // Compute the residual
-    compute_residual();
-  }
-}
-void normalize(cusp::array1d<real, cusp::device_memory>::view dio_v)
-{
-  // Subtract the minimum value
-  const real min = *thrust::min_element(dio_v.begin(), dio_v.end());
-  const detail::unary_minus<real> subf(min);
-  thrust::transform(dio_v.begin(), dio_v.end(), dio_v.begin(), subf);
-  // Divide by the maximum value
-  const real scale = 1.f / *thrust::max_element(dio_v.begin(), dio_v.end());
-  const detail::unary_multiplies<real> mulf(scale);
-  thrust::transform(dio_v.begin(), dio_v.end(), dio_v.begin(), mulf);
-}
-}  // namespace
 
 SPLIT_API void absolute_heights(
   cusp::coo_matrix<int, real, cusp::device_memory>::const_view
@@ -130,10 +85,10 @@ SPLIT_API void absolute_heights(
   d_h[0] = d_b[0];
 
   // Solve with Successive over relaxation
-  apply_sor(d_A, d_b, d_h, 0.9f, 1e-4f, i_max_iterations, false);
+  detail::apply_sor(d_A, d_b, d_h, 0.9f, 1e-4f, i_max_iterations, false);
 
   // Normalize the final heights
-  normalize(d_h);
+  detail::normalize(d_h.begin(), d_h.end());
 }
 }  // namespace sfs
 

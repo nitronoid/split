@@ -116,7 +116,7 @@ SPLIT_API void estimate_albedo_intensity(
   cudaMemcpyToSymbol(c_max_chroma, max_c, sizeof(real) * 2);
 
   const int n_chroma = i_nslots * i_nslots;
-  constexpr int scale = 8;
+  constexpr int scale = 16;
   const dim3 block_dim(scale, scale, 1);
   const dim3 nblocks{width - scale + 1, height - scale + 1, 1};
   const std::size_t nshared_mem =

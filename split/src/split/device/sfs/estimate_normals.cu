@@ -4,10 +4,10 @@
 #include "split/device/detail/matrix_functional.cuh"
 #include "split/device/detail/zip_it.cuh"
 #include "split/device/detail/cycle_iterator.cuh"
+#include "split/device/detail/apply_sor.cuh"
+#include "split/device/detail/normalize_vectors.cuh"
 #include <cusp/gallery/poisson.h>
 #include <cusp/convert.h>
-#include <cusp/relaxation/sor.h>
-#include <cusp/monitor.h>
 #include <cusparse_v2.h>
 
 #include <cusp/print.h>
@@ -257,37 +257,6 @@ void build_L(const float3 i_light_vector,
     cyclic_i, cyclic_i + do_L_star.size(), cyclic_L, do_L_star.begin(), mul);
 }
 
-void apply_sor(
-  cusp::csr_matrix<int, real, cusp::device_memory>::const_view di_A,
-  cusp::array1d<real, cusp::device_memory>::const_view di_b,
-  cusp::array1d<real, cusp::device_memory>::view do_x,
-  const real i_w,
-  const real i_tol,
-  const int i_max_iter,
-  const bool verbose)
-{
-  // Linear SOR operator
-  cusp::relaxation::sor<real, cusp::device_memory> M(di_A, i_w);
-  // Array to store the residual
-  cusp::array1d<real, cusp::device_memory> d_r(di_b.size());
-  // Compute the initial residual
-  const auto compute_residual = [&] __host__ {
-    cusp::multiply(di_A, do_x, d_r);
-    cusp::blas::axpy(di_b, d_r, -1.f);
-  };
-  compute_residual();
-  // Monitor the convergence
-  cusp::monitor<real> monitor(di_b, i_max_iter, i_tol, 0, verbose);
-  // Iterate until convergence criteria is met
-  for (; !monitor.finished(d_r); ++monitor)
-  {
-    // Apply the SOR linear operator to iterate on our solution
-    M(di_A, di_b, do_x);
-    // Compute the residual
-    compute_residual();
-  }
-}
-
 }  // namespace
 
 SPLIT_API void estimate_normals(
@@ -333,24 +302,10 @@ SPLIT_API void estimate_normals(
     });
 
   // Now we can solve for the relative normals via SOR
-  apply_sor(d_A, d_L_star, d_x, 1.f, 1e-5f, 1500, true);
+  detail::apply_sor(d_A, d_L_star, d_x, 1.f, 1e-5f, 1500, true);
 
   // Normalize the resulting solution
-  using vec3 = thrust::tuple<real, real, real>;
-  const auto normalize_vec = [] __host__ __device__(vec3 v) {
-    const real rmag =
-      1.f / std::sqrt(sqr(v.get<0>()) + sqr(v.get<1>()) + sqr(v.get<2>()));
-    v.get<0>() *= rmag;
-    v.get<1>() *= rmag;
-    v.get<2>() = std::abs(v.get<2>()) * rmag;
-    return v;
-  };
-  // Iterate over the 3 dimensional normals
-  auto norm_begin = detail::zip_it(do_normals.row(0).begin(),
-                                   do_normals.row(1).begin(),
-                                   do_normals.row(2).begin());
-  auto norm_end = norm_begin + n_normals;
-  thrust::transform(norm_begin, norm_end, norm_begin, normalize_vec);
+  detail::normalize_vectors(do_normals);
 }
 
 int n_poisson_entries(const int m, const int n)

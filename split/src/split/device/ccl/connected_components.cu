@@ -122,7 +122,7 @@ SPLIT_API void connected_components(
   make_gather_indices(col_begin, col_end, col_keys.begin());
   // We can transpose this upfront to avoid a permutation iterator later
   // Note we use the label memory here to avoid an extra allocation
-  detail::transposed_copy(height, width, col_keys, do_labels);
+  detail::transposed_copy<int>(height, width, col_keys, do_labels);
   // Copy back to the column keys
   thrust::copy(do_labels.begin(), do_labels.end(), col_keys.begin());
 
