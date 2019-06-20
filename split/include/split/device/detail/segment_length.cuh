@@ -4,6 +4,9 @@
 #include "split/detail/internal.h"
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/reduce.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
 

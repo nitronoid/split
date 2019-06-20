@@ -10,7 +10,7 @@ SPLIT_DEVICE_NAMESPACE_BEGIN
 
 namespace detail
 {
-struct transpose_index : public thrust::unary_function<int, int>
+struct transpose_index
 {
   const int M;
   const int N;

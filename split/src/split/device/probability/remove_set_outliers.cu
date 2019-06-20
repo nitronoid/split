@@ -1,6 +1,8 @@
 #include "split/device/probability/remove_set_outliers.cuh"
 #include "split/device/detail/zip_it.cuh"
 #include "split/device/detail/unary_functional.cuh"
+#include "split/device/detail/matrix_functional.cuh"
+#include <thrust/iterator/transform_output_iterator.h>
 #include <cusp/print.h>
 
 SPLIT_DEVICE_NAMESPACE_BEGIN
@@ -19,11 +21,22 @@ struct SquaredDistance
            (a.get<2>() * a.get<2>()); 
   }
 };
+struct CullSet
+{
+  int min_size;
+  __host__ __device__ bool operator()(int c)
+  {
+    // Mark this point for removal if more than half it's nearest albedos
+    // come from outside its own material set
+    return c < min_size;
+  }
+};
+
 }
 
 
 SPLIT_API int remove_set_outliers(
-  cusp::array2d<int, cusp::device_memory>::const_view di_albedo,
+  cusp::array2d<real, cusp::device_memory>::const_view di_albedo,
   cusp::array1d<int, cusp::device_memory>::view dio_set_ids,
   cusp::array1d<int, cusp::device_memory>::view dio_set_labels,
   thrust::device_ptr<void> dio_temp)
@@ -46,13 +59,13 @@ SPLIT_API int remove_set_outliers(
   cusp::array1d<int, cusp::device_memory> d_set_label_copy(ninsets);
   auto label_buff_begin = d_set_label_copy.begin();
 
-  // Removal marker
-  std::vector<short> removal_markers(ninsets, 0);
+  // Store the 10 nearest albedo labels for each point
+  const int group_size = 10;
+  cusp::array1d<int, cusp::device_memory> d_nearest(ninsets * group_size);
 
   // Functors for the loop
   const SquaredDistance vec_distance;
 
-  const int group_size = 10;
   for (int i = 0; i < ninsets; ++i)
   {
     // Re-initialize the set labels
@@ -69,20 +82,27 @@ SPLIT_API int remove_set_outliers(
     // First 10, but skip the distance to self which is obviously 0
     auto label_eq_begin = thrust::make_transform_iterator(
       label_buff_begin, detail::unary_equal<int>(dio_set_labels[i]));
-    const int nsimilar = thrust::reduce(
-      label_eq_begin + 1, label_eq_begin + 1 + group_size);
-    // Mark this point for removal if more than half it's nearest albedos come 
-    // from outside its own material set
-    removal_markers[i] = nsimilar < group_size / 2;
+    // Copy a 1 for each label in the group which matches our label
+    thrust::copy_n(label_eq_begin + 1, group_size, d_nearest.begin() + group_size * i);
   }
 
-  // Copy the removal markers to the device
-  cusp::array1d<short, cusp::device_memory> d_removal_markers = removal_markers;
-  const auto marker_begin = d_removal_markers.begin();
+  // Mark boundaries for the reduce
+  const auto seg_begin = detail::make_row_iterator(group_size);
+  const auto seg_end = seg_begin + d_nearest.size();
+  // Will store a 1 at indices of points that should be removed
+  cusp::array1d<short, cusp::device_memory> d_removal_markers(ninsets);
+  auto removal_out = thrust::make_transform_output_iterator(
+    d_removal_markers.begin(), CullSet{group_size / 2});
+  // Calculate how many were in the same set, and whether we need to remove
+  const auto discard_it = thrust::make_discard_iterator();
+  thrust::reduce_by_key(
+    seg_begin, seg_end, d_nearest.begin(), discard_it, removal_out);
+
   // Iterate over pairs of the set labels and point id's
   auto set_begin = detail::zip_it(dio_set_ids.begin(), dio_set_labels.begin());
   auto set_end = set_begin + ninsets;
   // Remove the marked points and get an iterator to the new end of the list
+  const auto marker_begin = d_removal_markers.begin();
   const auto new_end = thrust::remove_if(
     set_begin, set_end, marker_begin, detail::constant<bool>(true));
   // Return the number of remaining points
