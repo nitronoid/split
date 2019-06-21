@@ -12,6 +12,7 @@
 #include "split/device/detail/cycle_iterator.cuh"
 #include "split/host/stbi/stbi_raii.hpp"
 #include "split/device/detail/cu_raii.cuh"
+#include "split/device/detail/unary_functional.cuh"
 #include "split/device/morph/erode.cuh"
 #include "split/device/intrinsic/estimate_albedo_intensity.cuh"
 #include "split/device/probability/remove_set_outliers.cuh"
@@ -21,6 +22,7 @@
 #include <cusp/array1d.h>
 #include <cusp/array2d.h>
 #include <thrust/iterator/transform_output_iterator.h>
+#include <thrust/count.h>
 
 #include <chrono>
 
@@ -166,7 +168,6 @@ int main(int argc, char* argv[])
   make_device_image(h_image.get(), d_rgb_image);
   const int npixels = h_image.n_pixels();
 
-
   //-----------------------------------------------------------------
   cusp::array2d<real, cusp::device_memory> d_intensity_chroma(
     3, h_image.n_pixels());
@@ -195,11 +196,10 @@ int main(int argc, char* argv[])
   split::device::intrinsic::estimate_albedo_intensity(
     d_intensity, d_chroma, d_albedo_intensity);
 
-  cusp::array1d<real, cusp::device_memory> d_albedo(
-    3, h_image.n_pixels());
+  cusp::array2d<real, cusp::device_memory> d_albedo(3, h_image.n_pixels());
   // Now calc the albedo map
-  auto albedo_intensity_begin =
-    split::device::detail::make_cycle_iterator(d_albedo_intensity.begin(), npixels);
+  auto albedo_intensity_begin = split::device::detail::make_cycle_iterator(
+    d_albedo_intensity.begin(), npixels);
   thrust::transform(albedo_intensity_begin,
                     albedo_intensity_begin + npixels * 3,
                     d_chroma.values.begin(),
@@ -308,22 +308,34 @@ int main(int argc, char* argv[])
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("../assets/images/eroded.png", h_image);
 
+  printf("Probability begin\n");
   // Probability mapping
   // Filter out only the pixels left, post-erosion
-  const int n_set_ids = npixels - thrust::count(
-    d_segment_labels.values.begin(), d_segment_labels.values.begin(), 0);
+  const int n_set_ids = npixels - thrust::count(d_segment_labels.values.begin(),
+                                                d_segment_labels.values.begin(),
+                                                0);
   cusp::array1d<int, cusp::device_memory> d_set_ids(n_set_ids);
-  thrust::copy_if(
-    count, count + npixels, d_set_ids.begin(), detail::unary_equal<int>(0));
-  
-  split::device::probability::remove_set_outliers(
-    d_albedo, d_set_ids, d_segment_labels, d_temp.get());
+  const auto count = thrust::make_counting_iterator(0);
+  thrust::copy_if(count,
+                  count + npixels,
+                  d_set_ids.begin(),
+                  split::device::detail::unary_equal<int>(0));
 
-  const int nsets = 0;//TODO;
+  const int n_ids = split::device::probability::remove_set_outliers(
+    d_albedo, d_segment_labels.values, d_set_ids, d_temp.get());
+
+  printf("Outliers done\n");
+
+  const int nsets = nsegments;  // TODO;
   cusp::array2d<real, cusp::device_memory> d_probability(nsets,
                                                          h_image.n_pixels());
   split::device::probability::set_probability(
-    d_albedo, d_set_ids, d_segment_labels, d_probability);
+    d_albedo,
+    d_segment_labels.values,
+    split::device::detail::make_const_array1d_view(
+      d_set_ids.subarray(0, n_ids)),
+    d_probability.values);
+  printf("Probability done\n");
   //------------------------------------------------------------------
 #else
 

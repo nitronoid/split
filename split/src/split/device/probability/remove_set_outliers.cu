@@ -16,9 +16,8 @@ struct SquaredDistance
   using vec3 = thrust::tuple<real, real, real>;
   __host__ __device__ real operator()(const vec3& a, const vec3& b)
   {
-    return (a.get<0>() * a.get<0>()) + 
-           (a.get<1>() * a.get<1>()) + 
-           (a.get<2>() * a.get<2>()); 
+    return (a.get<0>() * a.get<0>()) + (a.get<1>() * a.get<1>()) +
+           (a.get<2>() * a.get<2>());
   }
 };
 struct CullSet
@@ -32,22 +31,24 @@ struct CullSet
   }
 };
 
-}
-
+}  // namespace
 
 SPLIT_API int remove_set_outliers(
   cusp::array2d<real, cusp::device_memory>::const_view di_albedo,
+  cusp::array1d<int, cusp::device_memory>::const_view di_set_labels,
   cusp::array1d<int, cusp::device_memory>::view dio_set_ids,
-  cusp::array1d<int, cusp::device_memory>::view dio_set_labels,
   thrust::device_ptr<void> dio_temp)
 {
   // Get the total number of points in all sets
   const int ninsets = dio_set_ids.size();
+  auto set_labels_begin = thrust::make_permutation_iterator(
+    di_set_labels.begin(), dio_set_ids.begin());
   // Iterate over point albedos in the provided sets
-  const auto albedo_begin = thrust::make_permutation_iterator(
-    detail::zip_it(di_albedo.row(0).begin(),
-                   di_albedo.row(1).begin(),
-                   di_albedo.row(2).begin()), dio_set_ids.begin());
+  const auto albedo_begin =
+    thrust::make_permutation_iterator(detail::zip_it(di_albedo.row(0).begin(),
+                                                     di_albedo.row(1).begin(),
+                                                     di_albedo.row(2).begin()),
+                                      dio_set_ids.begin());
   const auto albedo_end = albedo_begin + ninsets;
 
   // A buffer to store the distance from an albedo to all other albedos
@@ -69,7 +70,7 @@ SPLIT_API int remove_set_outliers(
   for (int i = 0; i < ninsets; ++i)
   {
     // Re-initialize the set labels
-    thrust::copy_n(dio_set_labels.begin(), ninsets, label_buff_begin);
+    thrust::copy_n(set_labels_begin, ninsets, label_buff_begin);
     // Get a fixed iterator that points to the current albedo
     const auto current_albedo = thrust::make_permutation_iterator(
       albedo_begin, thrust::make_constant_iterator(i));
@@ -81,9 +82,10 @@ SPLIT_API int remove_set_outliers(
     thrust::sort_by_key(distances_begin, distances_end, label_buff_begin);
     // First 10, but skip the distance to self which is obviously 0
     auto label_eq_begin = thrust::make_transform_iterator(
-      label_buff_begin, detail::unary_equal<int>(dio_set_labels[i]));
+      label_buff_begin, detail::unary_equal<int>(set_labels_begin[i]));
     // Copy a 1 for each label in the group which matches our label
-    thrust::copy_n(label_eq_begin + 1, group_size, d_nearest.begin() + group_size * i);
+    thrust::copy_n(
+      label_eq_begin + 1, group_size, d_nearest.begin() + group_size * i);
   }
 
   // Mark boundaries for the reduce
@@ -98,15 +100,14 @@ SPLIT_API int remove_set_outliers(
   thrust::reduce_by_key(
     seg_begin, seg_end, d_nearest.begin(), discard_it, removal_out);
 
-  // Iterate over pairs of the set labels and point id's
-  auto set_begin = detail::zip_it(dio_set_ids.begin(), dio_set_labels.begin());
-  auto set_end = set_begin + ninsets;
   // Remove the marked points and get an iterator to the new end of the list
   const auto marker_begin = d_removal_markers.begin();
-  const auto new_end = thrust::remove_if(
-    set_begin, set_end, marker_begin, detail::constant<bool>(true));
+  const auto new_end = thrust::remove_if(dio_set_ids.begin(),
+                                         dio_set_ids.end(),
+                                         marker_begin,
+                                         detail::constant<bool>(true));
   // Return the number of remaining points
-  return set_begin - new_end;
+  return dio_set_ids.begin() - new_end;
 }
 
 }  // namespace probability

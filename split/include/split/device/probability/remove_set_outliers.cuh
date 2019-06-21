@@ -11,8 +11,8 @@ namespace probability
 {
 SPLIT_API int remove_set_outliers(
   cusp::array2d<real, cusp::device_memory>::const_view di_albedo,
+  cusp::array1d<int, cusp::device_memory>::const_view di_set_labels,
   cusp::array1d<int, cusp::device_memory>::view dio_set_ids,
-  cusp::array1d<int, cusp::device_memory>::view dio_set_labels,
   thrust::device_ptr<void> dio_temp);
 
 }  // namespace probability
