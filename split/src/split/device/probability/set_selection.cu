@@ -92,12 +92,6 @@ SPLIT_API int set_selection(
   thrust::stable_sort_by_key(
     sorted_labels_begin, sorted_labels_end, dio_set_ids.begin());
 
-  cusp::array1d<int, cusp::device_memory> check(ninsets);
-  auto e =thrust::unique_copy(sorted_labels_begin, sorted_labels_end, check.begin());
-  int n = e - check.begin();
-  printf("N:%d\n", n);
-  cusp::print(check.subarray(0, n));
-
   // Pick the 10 id's from each set nearest to the set's mean 
   return detail::shrink_segments(
     sorted_labels_begin, sorted_labels_end, dio_set_ids.begin(), i_nsets, 10);

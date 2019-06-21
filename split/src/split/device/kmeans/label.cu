@@ -57,13 +57,11 @@ void compute_distances(
                                                      di_targets.row(2).begin()),
                                       detail::make_column_iterator(M));
 
-  {
-    thrust::transform(source_begin,
-                      source_begin + N * M,
-                      target_begin,
-                      do_distances.begin(),
-                      Norm2());
-  }
+  thrust::transform(source_begin,
+                    source_begin + N * M,
+                    target_begin,
+                    do_distances.begin(),
+                    Norm2());
 }  // namespace
 }  // namespace
 

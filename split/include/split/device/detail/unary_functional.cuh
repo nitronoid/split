@@ -111,6 +111,20 @@ struct unary_modulo
 };
 
 template <typename T>
+struct unary_pow
+{
+  unary_pow(T i_exponent) : exponent(i_exponent)
+  {
+  }
+  T exponent;
+
+  __host__ __device__ T operator()(T i_x) const
+  {
+    return pow(i_x, exponent);
+  }
+};
+
+template <typename T>
 struct unary_exp
 {
   __host__ __device__ T operator()(T i_x) const

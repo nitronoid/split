@@ -13,6 +13,7 @@ SPLIT_API void set_probability(
   cusp::array2d<real, cusp::device_memory>::const_view di_albedo,
   cusp::array1d<int, cusp::device_memory>::const_view di_set_labels,
   cusp::array1d<int, cusp::device_memory>::const_view dio_set_ids,
+  const int i_nsets,
   cusp::array1d<real, cusp::device_memory>::view do_probability);
 
 }  // namespace probability

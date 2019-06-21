@@ -13,10 +13,12 @@
 #include "split/host/stbi/stbi_raii.hpp"
 #include "split/device/detail/cu_raii.cuh"
 #include "split/device/detail/unary_functional.cuh"
+#include "split/device/detail/shrink_segments.cuh"
 #include "split/device/morph/erode.cuh"
 #include "split/device/intrinsic/estimate_albedo_intensity.cuh"
 #include "split/device/probability/remove_set_outliers.cuh"
 #include "split/device/probability/set_probability.cuh"
+#include "split/device/probability/set_selection.cuh"
 
 #include <cusp/print.h>
 #include <cusp/array1d.h>
@@ -61,21 +63,18 @@ static const char* _cudaGetErrorEnum(cublasStatus_t error)
 void sandbox()
 {
   printf("\n\n\n\n\n SANDBOX\n\n");
-  const int A = 0;
-  const int B = 1;
-  const int C = 2;
-  const int D = 3;
-  std::vector<int> labels = {A, A, A, A, A, A, A, A, A, A, A, B, B, B, A, A, A,
-                             A, B, B, B, A, A, B, B, B, B, B, C, C, B, B, B, B,
-                             B, C, C, C, C, C, D, D, C, C, C, C, C, D, D};
-  const int npixels = 42;
+  std::vector<int> labels = {0,0,0,0,0,0, 1,1,1, 2,2, 3,3,3,3, 4, 5,5,5,5};
+  const int nseg = 6;
+  const int ndata = 20;
 
-  cusp::array2d<int, cusp::device_memory> d_labels(7, 7);
-  thrust::copy_n(labels.begin(), npixels, d_labels.values.begin());
+  cusp::array1d<int, cusp::device_memory> d_dummy(ndata);
+  cusp::array1d<int, cusp::device_memory> d_labels(ndata);
+  thrust::copy_n(labels.begin(), ndata, d_labels.begin());
 
-  split::device::morph::erode(d_labels, 2);
+  const int nleft = split::device::detail::shrink_segments(
+    d_labels.begin(), d_labels.end(), d_dummy.begin(), nseg, 3);
 
-  cusp::print(d_labels);
+  cusp::print(d_labels.subarray(0, nleft));
 }
 
 template <typename T>
@@ -263,7 +262,7 @@ int main(int argc, char* argv[])
       d_lab_image.values.subarray(h_image.n_pixels(), h_image.n_pixels() * 2),
       cusp::row_major{}));
 
-  for (int i = 0; i < 10 && (nsegments > 5000 || i < 1); ++i)
+  for (int i = 0; i < 10; ++i)
   {
     TempMemory d_temp(
       split::device::ccl::merge_small_segments_workspace(npixels, nsegments));
@@ -304,38 +303,63 @@ int main(int argc, char* argv[])
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
     d_segment_labels.values, d_seg_centroids, d_rgb_image);
+  thrust::transform(d_segment_labels.values.begin(),d_segment_labels.values.end(),d_segment_labels.values.begin(), split::device::detail::unary_minus<int>(1));
 
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("../assets/images/eroded.png", h_image);
 
   printf("Probability begin\n");
+
+  const int nsets = nsegments - 1;  // TODO;
+  printf("NSets: %d\n", nsets);
   // Probability mapping
   // Filter out only the pixels left, post-erosion
-  const int n_set_ids = npixels - thrust::count(d_segment_labels.values.begin(),
-                                                d_segment_labels.values.begin(),
-                                                0);
+  int n_set_ids = npixels - thrust::count(d_segment_labels.values.begin(),
+                                          d_segment_labels.values.end(),
+                                          -1);
+  printf("NSet IDs: %d\n", n_set_ids);
   cusp::array1d<int, cusp::device_memory> d_set_ids(n_set_ids);
   const auto count = thrust::make_counting_iterator(0);
+  const auto labell = d_segment_labels.values.begin();
   thrust::copy_if(count,
                   count + npixels,
                   d_set_ids.begin(),
-                  split::device::detail::unary_equal<int>(0));
+                  [=] __host__ __device__ (int i)
+                  {
+                    return labell[i] != -1;
+                  });
 
-  const int n_ids = split::device::probability::remove_set_outliers(
-    d_albedo, d_segment_labels.values, d_set_ids, d_temp.get());
+  n_set_ids = split::device::probability::set_selection(
+    d_albedo, d_seg_centroids, d_segment_labels.values, d_set_ids, nsets);
+  printf("NSet IDs: %d\n", n_set_ids);
 
-  printf("Outliers done\n");
+  printf("Selection done\n");
 
-  const int nsets = nsegments;  // TODO;
   cusp::array2d<real, cusp::device_memory> d_probability(nsets,
                                                          h_image.n_pixels());
   split::device::probability::set_probability(
     d_albedo,
     d_segment_labels.values,
     split::device::detail::make_const_array1d_view(
-      d_set_ids.subarray(0, n_ids)),
+      d_set_ids.subarray(0, n_set_ids)),
+    nsets,
     d_probability.values);
   printf("Probability done\n");
+
+
+  const int prob_idx = 2;
+
+  for (int i = 0; i < nsets; ++i)
+  {
+  auto prob = d_probability.row(i);
+  auto prob_begin = split::device::detail::make_cycle_iterator(
+    prob.begin(), npixels);
+  thrust::copy_n(prob_begin, npixels*3, d_rgb_image.values.begin());
+  make_host_image(d_rgb_image, h_image.get());
+  std::string path = "../assets/images/prob"+ std::to_string(i)+".png";
+  split::host::stbi::writef(path.c_str(), h_image);
+  }
+
   //------------------------------------------------------------------
 #else
 
