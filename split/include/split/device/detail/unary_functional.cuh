@@ -65,6 +65,20 @@ struct unary_equal
 };
 
 template <typename T>
+struct unary_not_equal
+{
+  unary_not_equal(T i_rhs) : rhs(i_rhs)
+  {
+  }
+  T rhs;
+
+  __host__ __device__ T operator()(T i_lhs) const
+  {
+    return i_lhs != rhs;
+  }
+};
+
+template <typename T>
 struct reciprocal
 {
   __host__ __device__ T operator()(T i_rhs) const
