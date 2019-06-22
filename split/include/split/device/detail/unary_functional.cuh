@@ -23,6 +23,22 @@ struct constant
 };
 
 template <typename T>
+struct unary_clamp
+{
+  unary_clamp(T lo, T hi) : lo(lo), hi(hi)
+  {
+  }
+  T lo;
+  T hi;
+
+  __host__ __device__ T operator()(T i_lhs) const
+  {
+    return max(min(i_lhs, hi), lo);
+  }
+};
+
+
+template <typename T>
 struct unary_max
 {
   unary_max(T i_rhs) : rhs(i_rhs)

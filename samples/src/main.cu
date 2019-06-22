@@ -63,7 +63,8 @@ static const char* _cudaGetErrorEnum(cublasStatus_t error)
 void sandbox()
 {
   printf("\n\n\n\n\n SANDBOX\n\n");
-  std::vector<int> labels = {0,0,0,0,0,0, 1,1,1, 2,2, 3,3,3,3, 4, 5,5,5,5};
+  std::vector<int> labels = {0, 0, 0, 0, 0, 0, 1, 1, 1, 2,
+                             2, 3, 3, 3, 3, 4, 5, 5, 5, 5};
   const int nseg = 6;
   const int ndata = 20;
 
@@ -166,6 +167,10 @@ int main(int argc, char* argv[])
                                                        h_image.n_pixels());
   make_device_image(h_image.get(), d_rgb_image);
   const int npixels = h_image.n_pixels();
+  thrust::transform(d_rgb_image.values.begin(),
+                    d_rgb_image.values.end(),
+                    d_rgb_image.values.begin(),
+                    split::device::detail::unary_max<real>(1.f / 255.f));
 
   //-----------------------------------------------------------------
   cusp::array2d<real, cusp::device_memory> d_intensity_chroma(
@@ -299,11 +304,14 @@ int main(int argc, char* argv[])
     split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
   // Re-calculate the centroids using the segment labels
   split::device::kmeans::calculate_centroids(
-    d_segment_labels.values, d_rgb_image, d_seg_centroids, d_temp.get());
+    d_segment_labels.values, d_albedo, d_seg_centroids, d_temp.get());
   // Copy the segment means to their member pixels
   split::device::kmeans::propagate_centroids(
     d_segment_labels.values, d_seg_centroids, d_rgb_image);
-  thrust::transform(d_segment_labels.values.begin(),d_segment_labels.values.end(),d_segment_labels.values.begin(), split::device::detail::unary_minus<int>(1));
+  thrust::transform(d_segment_labels.values.begin(),
+                    d_segment_labels.values.end(),
+                    d_segment_labels.values.begin(),
+                    split::device::detail::unary_minus<int>(1));
 
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("../assets/images/eroded.png", h_image);
@@ -324,10 +332,7 @@ int main(int argc, char* argv[])
   thrust::copy_if(count,
                   count + npixels,
                   d_set_ids.begin(),
-                  [=] __host__ __device__ (int i)
-                  {
-                    return labell[i] != -1;
-                  });
+                  [=] __host__ __device__(int i) { return labell[i] != -1; });
 
   n_set_ids = split::device::probability::set_selection(
     d_albedo, d_seg_centroids, d_segment_labels.values, d_set_ids, nsets);
@@ -346,18 +351,15 @@ int main(int argc, char* argv[])
     d_probability.values);
   printf("Probability done\n");
 
-
-  const int prob_idx = 2;
-
   for (int i = 0; i < nsets; ++i)
   {
-  auto prob = d_probability.row(i);
-  auto prob_begin = split::device::detail::make_cycle_iterator(
-    prob.begin(), npixels);
-  thrust::copy_n(prob_begin, npixels*3, d_rgb_image.values.begin());
-  make_host_image(d_rgb_image, h_image.get());
-  std::string path = "../assets/images/prob"+ std::to_string(i)+".png";
-  split::host::stbi::writef(path.c_str(), h_image);
+    auto prob = d_probability.row(i);
+    auto prob_begin =
+      split::device::detail::make_cycle_iterator(prob.begin(), npixels);
+    thrust::copy_n(prob_begin, npixels * 3, d_rgb_image.values.begin());
+    make_host_image(d_rgb_image, h_image.get());
+    std::string path = "../assets/images/prob" + std::to_string(i) + ".png";
+    split::host::stbi::writef(path.c_str(), h_image);
   }
 
   //------------------------------------------------------------------
