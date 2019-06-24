@@ -259,25 +259,25 @@ int main(int argc, char* argv[])
   split::device::kmeans::calculate_centroids(
     d_cluster_labels.values, d_rgb_image, d_centroids, d_temp.get());
   //---------------------------------------------------------------------------
-  auto d_chrominance =
-    split::device::detail::make_const_array2d_view(cusp::make_array2d_view(
-      2,
-      h_image.n_pixels(),
-      h_image.n_pixels(),
-      d_lab_image.values.subarray(h_image.n_pixels(), h_image.n_pixels() * 2),
-      cusp::row_major{}));
+  //auto d_chrominance =
+  //  split::device::detail::make_const_array2d_view(cusp::make_array2d_view(
+  //    2,
+  //    h_image.n_pixels(),
+  //    h_image.n_pixels(),
+  //    d_lab_image.values.subarray(h_image.n_pixels(), h_image.n_pixels() * 2),
+  //    cusp::row_major{}));
 
-  for (int i = 0; i < 10; ++i)
-  {
-    TempMemory d_temp(
-      split::device::ccl::merge_small_segments_workspace(npixels, nsegments));
-    std::cout << "Merging small clusters\n";
-    split::device::ccl::merge_small_segments(
-      d_chrominance, d_segment_labels, d_temp.get(), 10 * (i + 1));
-    nsegments = split::device::ccl::compress_labels(d_segment_labels.values,
-                                                    d_temp.get());
-  }
-  printf("Number of segments post merge: %d\n", nsegments);
+  //for (int i = 0; i < 10; ++i)
+  //{
+  //  TempMemory d_temp(
+  //    split::device::ccl::merge_small_segments_workspace(npixels, nsegments));
+  //  std::cout << "Merging small clusters\n";
+  //  split::device::ccl::merge_small_segments(
+  //    d_chrominance, d_segment_labels, d_temp.get(), 10 * (i + 1));
+  //  nsegments = split::device::ccl::compress_labels(d_segment_labels.values,
+  //                                                  d_temp.get());
+  //}
+  //printf("Number of segments post merge: %d\n", nsegments);
 
   // Sanity check
   make_host_image(d_rgb_image, h_image.get());
