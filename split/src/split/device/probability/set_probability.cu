@@ -138,7 +138,7 @@ SPLIT_API void set_probability(
                     thrust::divides<real>());
 
   const auto avg_begin = thrust::make_transform_iterator(
-    d_averages.begin(), detail::unary_pow<real>(15.f));
+    d_averages.begin(), detail::unary_pow<real>(20.f));
   const auto avg_end = avg_begin + npoints * i_nsets;
   // Reduce by row to get the total distance from each point to all sets
   cusp::array1d<real, cusp::device_memory> d_total_distance(npoints);

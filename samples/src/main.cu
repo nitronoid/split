@@ -299,7 +299,7 @@ int main(int argc, char* argv[])
   make_host_image(d_rgb_image, h_image.get());
   split::host::stbi::writef("../assets/images/components.png", h_image);
 
-  split::device::morph::erode(d_segment_labels, 15);
+  split::device::morph::erode(d_segment_labels, 10);
   nsegments =
     split::device::ccl::compress_labels(d_segment_labels.values, d_temp.get());
   // Re-calculate the centroids using the segment labels
